@@ -49,7 +49,7 @@ input[type=file]{display:none}
 </head>
 <body>
 <h1>Chess Thermodynamics Weight Fitter</h1>
-<p class="subtitle">Fit the equation of state from a PGN database (Texel-style logistic regression)</p>
+<p class="subtitle">Fit PV weights from a PGN database (OLS ridge regression on dF)</p>
 
 <div id="drop-zone" onclick="document.getElementById('file-input').click()">
   <p class="big">Drop PGN file here</p>
@@ -93,8 +93,8 @@ const GREEN=new Float64Array(4096);
 for(let a=0;a<64;a++)for(let b=0;b<64;b++)
   GREEN[a*64+b]=1/(1+Math.max(Math.abs((a&7)-(b&7)),Math.abs((a>>3)-(b>>3))));
 
-const NF_TOTAL=27,INT_OFF=3,NF=23,NQ=NF*(NF+1)/2,NTOTAL=NF+NQ;
-const F_DS=2,F_T0=26;
+const NF_TOTAL=29,INT_OFF=6,NF=23,NQ=NF*(NF+1)/2,NTOTAL=NF+NQ;
+const F_UW=0,F_UB=1,F_TW=2,F_TB=3,F_SW=4,F_SB=5;
 const INT_NAMES=["D1W","D1B","D2W","D2B",
   "Q11W","Q11B","Q22W","Q22B","Q12W","Q12B",
   "AWK","DWK","ABK","DBK","ETAW","ETAB",
@@ -340,10 +340,34 @@ function xrayMobility(pc,sq,color){
   return c;
 }
 
+function moveConcentration(counts,total){
+  if(total===0)return 0;
+  let H=0;
+  for(let i=0;i<counts.length;i++){if(counts[i]>0){const p=counts[i]/total;H-=p*Math.log(p);}}
+  return total/Math.exp(H);
+}
+
+function addXraySquares(pc,sq,color,covMap){
+  const r=sq>>3,f=sq&7;
+  if(pc===PAWN){
+    const dir=color,nr=r+dir;
+    if(nr>=0&&nr<=7){covMap[nr*8+f]++;if(f>0)covMap[nr*8+f-1]++;if(f<7)covMap[nr*8+f+1]++;}
+    if(r===(color===WHITE?1:6))covMap[(r+dir*2)*8+f]++;
+    return;
+  }
+  if(pc===KNIGHT){for(let i=0;i<8;i++){const nr=r+KNIGHT_DR[i],nf=f+KNIGHT_DF[i];if(nr>=0&&nr<8&&nf>=0&&nf<8)covMap[nr*8+nf]++;}return;}
+  if(pc===KING){for(let dr=-1;dr<=1;dr++)for(let df=-1;df<=1;df++){if(!dr&&!df)continue;const nr=r+dr,nf=f+df;if(nr>=0&&nr<8&&nf>=0&&nf<8)covMap[nr*8+nf]++;}return;}
+  const dirs=pc===BISHOP?[4,5,6,7]:pc===ROOK?[0,1,2,3]:[0,1,2,3,4,5,6,7];
+  for(const d of dirs){let cr=r+SLIDE_DIRS[d][0],cf=f+SLIDE_DIRS[d][1];while(cr>=0&&cr<8&&cf>=0&&cf<8){covMap[cr*8+cf]++;cr+=SLIDE_DIRS[d][0];cf+=SLIDE_DIRS[d][1];}}
+}
+
 function computeFeatures(pos){
   const b=pos.board,feat=new Float64Array(NF_TOTAL);
+  const covW=new Uint8Array(64),covB=new Uint8Array(64);
   const srcW=new Float64Array(64),srcB=new Float64Array(64);
-  let wkSq=-1,bkSq=-1,nPawns=0,nThermal=0;
+  const movesW=[],movesB=[];
+  let wkSq=-1,bkSq=-1;
+  let totalXrayW=0,totalXrayB=0,Uw=0,Ub=0;
   let pcW=0,pcB=0,paW=0,paB=0;
   const pfW=[],pfB=[];
 
@@ -352,13 +376,25 @@ function computeFeatures(pos){
     const apc=Math.abs(b[sq]),color=Math.sign(b[sq]);
     if(apc===KING){if(color===WHITE)wkSq=sq;else bkSq=sq;}
     const fi=xrayMobility(apc,sq,color);
-    const si=fi*Math.log(2+fi);
-    if(apc===PAWN){nPawns++;
+    addXraySquares(apc,sq,color,color===WHITE?covW:covB);
+    if(color===WHITE){srcW[sq]=fi;totalXrayW+=fi;}
+    else{srcB[sq]=fi;totalXrayB+=fi;}
+    const mi=pieceMobility(b,sq,pos.ep);
+    if(color===WHITE){Uw+=mi;movesW.push(mi);}
+    else{Ub+=mi;movesB.push(mi);}
+    if(apc===PAWN){
       if(color===WHITE){pcW++;paW+=(sq>>3)-1;pfW.push(sq&7);}
       else{pcB++;paB+=6-(sq>>3);pfB.push(sq&7);}
-    }else if(apc!==KING){nThermal++;}
-    if(color===WHITE)srcW[sq]=si;else srcB[sq]=si;
+    }
   }
+
+  feat[F_UW]=Uw;feat[F_UB]=Ub;
+  feat[F_TW]=moveConcentration(movesW,Uw);
+  feat[F_TB]=moveConcentration(movesB,Ub);
+  let unionW=0,unionB=0;
+  for(let sq=0;sq<64;sq++){if(covW[sq])unionW++;if(covB[sq])unionB++;}
+  feat[F_SW]=totalXrayW>0?1-unionW/totalXrayW:0;
+  feat[F_SB]=totalXrayB>0?1-unionB/totalXrayB:0;
 
   const rhoW=new Float64Array(64),rhoB=new Float64Array(64);
   for(let x=0;x<64;x++){
@@ -368,12 +404,6 @@ function computeFeatures(pos){
     }
     rhoW[x]=fw;rhoB[x]=fb;
   }
-
-  let Sw=0,Sb=0;
-  for(let sq=0;sq<64;sq++){Sw+=srcW[sq];Sb+=srcB[sq];}
-  feat[0]=Sw;feat[1]=Sb;feat[2]=Sw-Sb;
-
-  feat[26]=nThermal>0?(62-nPawns)/nThermal:99;
 
   let totalAbs=0,cx=0,cy=0;
   for(let sq=0;sq<64;sq++){
@@ -412,8 +442,8 @@ function computeFeatures(pos){
     if(sw>0){d1w+=sw*u1;d2w+=sw*u2;q11w+=sw*u1*u1;q22w+=sw*u2*u2;q12w+=sw*u1*u2;}
     if(sb>0){d1b+=sb*u1;d2b+=sb*u2;q11b+=sb*u1*u1;q22b+=sb*u2*u2;q12b+=sb*u1*u2;}
   }
-  feat[3]=d1w;feat[4]=d1b;feat[5]=d2w;feat[6]=d2b;
-  feat[7]=q11w;feat[8]=q11b;feat[9]=q22w;feat[10]=q22b;feat[11]=q12w;feat[12]=q12b;
+  feat[6]=d1w;feat[7]=d1b;feat[8]=d2w;feat[9]=d2b;
+  feat[10]=q11w;feat[11]=q11b;feat[12]=q22w;feat[13]=q22b;feat[14]=q12w;feat[15]=q12b;
 
   if(wkSq>=0&&bkSq>=0){
     let awk=0,dwk=0,abk=0,dbk=0;
@@ -421,18 +451,18 @@ function computeFeatures(pos){
       const kw=GREEN[sq*64+wkSq],kb=GREEN[sq*64+bkSq];
       awk+=rhoB[sq]*kw;dwk+=rhoW[sq]*kw;abk+=rhoW[sq]*kb;dbk+=rhoB[sq]*kb;
     }
-    feat[13]=awk;feat[14]=dwk;feat[15]=abk;feat[16]=dbk;
+    feat[16]=awk;feat[17]=dwk;feat[18]=abk;feat[19]=dbk;
   }
 
-  if(Sw>1e-12){let eta=0;for(let sq=0;sq<64;sq++){if(srcW[sq]>0){const p=srcW[sq]/Sw;eta-=p*Math.log(p);}}feat[17]=eta;}
-  if(Sb>1e-12){let eta=0;for(let sq=0;sq<64;sq++){if(srcB[sq]>0){const p=srcB[sq]/Sb;eta-=p*Math.log(p);}}feat[18]=eta;}
+  if(totalXrayW>1e-12){let eta=0;for(let sq=0;sq<64;sq++){if(srcW[sq]>0){const p=srcW[sq]/totalXrayW;eta-=p*Math.log(p);}}feat[20]=eta;}
+  if(totalXrayB>1e-12){let eta=0;for(let sq=0;sq<64;sq++){if(srcB[sq]>0){const p=srcB[sq]/totalXrayB;eta-=p*Math.log(p);}}feat[21]=eta;}
 
-  feat[19]=pcW;feat[20]=pcB;feat[21]=paW;feat[22]=paB;
-  if(pfW.length>1){const m=pfW.reduce((a,b)=>a+b,0)/pfW.length;feat[23]=pfW.reduce((a,b)=>a+(b-m)*(b-m),0)/pfW.length;}
-  if(pfB.length>1){const m=pfB.reduce((a,b)=>a+b,0)/pfB.length;feat[24]=pfB.reduce((a,b)=>a+(b-m)*(b-m),0)/pfB.length;}
+  feat[22]=pcW;feat[23]=pcB;feat[24]=paW;feat[25]=paB;
+  if(pfW.length>1){const m=pfW.reduce((a,b)=>a+b,0)/pfW.length;feat[26]=pfW.reduce((a,b)=>a+(b-m)*(b-m),0)/pfW.length;}
+  if(pfB.length>1){const m=pfB.reduce((a,b)=>a+b,0)/pfB.length;feat[27]=pfB.reduce((a,b)=>a+(b-m)*(b-m),0)/pfB.length;}
 
   let tau=0;for(let x=0;x<64;x++)tau+=rhoW[x]*rhoB[x];
-  feat[25]=tau;
+  feat[28]=tau;
   return feat;
 }
 
@@ -486,7 +516,7 @@ function parseSAN(pos,san){
 self.onmessage=function(e){
   const{text,maxGames,sampleEvery,skipOpening}=e.data;
 
-  // Phase 1: Parse PGN and extract interaction features + T0*DS targets
+  // Phase 1: Parse PGN and extract interaction features + dF targets
   const X=[],Y=[];
   let gameCount=0,parseErrors=0;
   const lines=text.split('\n');
@@ -514,7 +544,7 @@ self.onmessage=function(e){
       if(ply<=skipOpening)continue;
       if(ply%sampleEvery!==0)continue;
       const feat=computeFeatures(pos);
-      const target=feat[F_T0]*feat[F_DS];
+      const target=(feat[F_UW]-feat[F_TW]*feat[F_SW])-(feat[F_UB]-feat[F_TB]*feat[F_SB]);
       const intFeat=feat.slice(INT_OFF,INT_OFF+NF);
       X.push(expandQuad(intFeat));
       Y.push(target);
@@ -719,7 +749,7 @@ function showResults(weights){
 function generateJS(weights){
   const lin=weights.slice(0,NF);
   let out='function createSeeded(){\n  const ind=new Individual();\n';
-  out+='  // Interaction weights (U term, OLS on T0*DS). eval = T0*DS - U.\n';
+  out+='  // PV weights (potential energy, OLS on dF). eval = dF - PV.\n';
   for(let i=0;i<NF;i++){
     if(Math.abs(lin[i])>1e-8)
       out+=`  ind.wLin[${i}]=${lin[i].toFixed(6)}; // ${FEAT_NAMES[i]}\n`;

@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """
-Fit the thermodynamic interaction weights from a PGN database.
+Fit the thermodynamic PV (potential energy) weights from a PGN database.
 
-Reimplements the DOF-entropy feature extraction from
-chess_thermodynamics.html, then fits the interaction energy U
-such that U = T*S on positions from well-played games (F = U - TS = 0
-at thermodynamic equilibrium). Uses ordinary least squares regression.
+Reimplements the Gibbs free energy feature extraction from
+chess_thermodynamics.html:
+  - U = kinetic energy (total legal moves per side)
+  - T = temperature (move concentration = M/exp(H) where H = Shannon entropy)
+  - S = entropy (xray redundancy = 1 - |union xray squares| / sum(xray per piece))
+  - dF = (U_w - T_w*S_w) - (U_b - T_b*S_b)
+
+PV is the potential energy, fitted via OLS so PV ~ dF at equilibrium.
+Engine eval = dF - PV.
 
 Requirements:
     pip install python-chess scikit-learn numpy
@@ -18,8 +23,8 @@ Recommended data source:
     Download a monthly PGN file, decompress with: pzstd -d file.pgn.zst
 
 Output:
-    Prints fitted interaction weights as JS code to paste into
-    createSeeded() in the HTML. Engine eval = T*DS - U.
+    Prints fitted PV weights as JS code to paste into
+    createSeeded() in the HTML. Engine eval = dF - PV.
 """
 
 import sys
@@ -33,19 +38,21 @@ from sklearn.linear_model import Ridge
 # -------------------------------------------------------------------------
 #  Constants matching the JS engine
 # -------------------------------------------------------------------------
-NF_TOTAL = 27
-NF = 23  # interaction features (indices 3..25 of full feature vector)
+NF_TOTAL = 29
+NF = 23  # interaction features (indices 6..28 of full feature vector)
 NQ = NF * (NF + 1) // 2  # 276
-INT_OFF = 3  # offset into full feature array
+INT_OFF = 6
 
-# Full feature indices (for compute_features, which returns 27 values)
-F_SW, F_SB, F_DS = 0, 1, 2
-F_D1W, F_D1B, F_D2W, F_D2B = 3, 4, 5, 6
-F_Q11W, F_Q11B, F_Q22W, F_Q22B, F_Q12W, F_Q12B = 7, 8, 9, 10, 11, 12
-F_AWK, F_DWK, F_ABK, F_DBK = 13, 14, 15, 16
-F_ETAW, F_ETAB = 17, 18
-F_PW, F_PB, F_PADVW, F_PADVB, F_PSPRW, F_PSPRB = 19, 20, 21, 22, 23, 24
-F_TAU, F_T0 = 25, 26
+# Full feature indices
+F_UW, F_UB = 0, 1
+F_TW, F_TB = 2, 3
+F_SW, F_SB = 4, 5
+F_D1W, F_D1B, F_D2W, F_D2B = 6, 7, 8, 9
+F_Q11W, F_Q11B, F_Q22W, F_Q22B, F_Q12W, F_Q12B = 10, 11, 12, 13, 14, 15
+F_AWK, F_DWK, F_ABK, F_DBK = 16, 17, 18, 19
+F_ETAW, F_ETAB = 20, 21
+F_PW, F_PB, F_PADVW, F_PADVB, F_PSPRW, F_PSPRB = 22, 23, 24, 25, 26, 27
+F_TAU = 28
 
 # Precompute Green's function: G(x,s) = 1/(1 + d_chebyshev(x,s))
 GREEN = np.zeros((64, 64), dtype=np.float64)
@@ -96,6 +103,56 @@ def xray_mobility(piece_type: int, sq: int, color: bool) -> int:
             cf += df
     return c
 
+
+def add_xray_squares(piece_type: int, sq: int, color: bool, cov: np.ndarray):
+    """Mark all xray squares for a piece into a coverage map."""
+    r, f = sq >> 3, sq & 7
+    if piece_type == chess.PAWN:
+        d = 1 if color == chess.WHITE else -1
+        nr = r + d
+        if 0 <= nr <= 7:
+            cov[nr * 8 + f] += 1
+            if f > 0: cov[nr * 8 + f - 1] += 1
+            if f < 7: cov[nr * 8 + f + 1] += 1
+        if r == (1 if color == chess.WHITE else 6):
+            cov[(r + d * 2) * 8 + f] += 1
+        return
+    if piece_type == chess.KNIGHT:
+        for dr, df in KNIGHT_OFFSETS:
+            nr, nf = r + dr, f + df
+            if 0 <= nr < 8 and 0 <= nf < 8:
+                cov[nr * 8 + nf] += 1
+        return
+    if piece_type == chess.KING:
+        for dr in (-1, 0, 1):
+            for df in (-1, 0, 1):
+                if dr == 0 and df == 0:
+                    continue
+                nr, nf = r + dr, f + df
+                if 0 <= nr < 8 and 0 <= nf < 8:
+                    cov[nr * 8 + nf] += 1
+        return
+    dirs = SLIDE_DIRS_MAP.get(piece_type, [])
+    for dr, df in dirs:
+        cr, cf = r + dr, f + df
+        while 0 <= cr < 8 and 0 <= cf < 8:
+            cov[cr * 8 + cf] += 1
+            cr += dr
+            cf += df
+
+
+def move_concentration(counts, total):
+    """T = M / exp(H) where H = Shannon entropy of per-piece move distribution."""
+    if total == 0:
+        return 0.0
+    H = 0.0
+    for c in counts:
+        if c > 0:
+            p = c / total
+            H -= p * math.log(p)
+    return total / math.exp(H)
+
+
 # -------------------------------------------------------------------------
 #  Mobility computation (matches JS pieceMobility exactly)
 # -------------------------------------------------------------------------
@@ -115,7 +172,6 @@ def piece_mobility(board: chess.Board, sq: int) -> int:
         start_rank = 1 if color == chess.WHITE else 6
         enemy = not color
 
-        # Captures (including en passant)
         for df in (-1, 1):
             nf = f + df
             nr = r + direction
@@ -124,7 +180,6 @@ def piece_mobility(board: chess.Board, sq: int) -> int:
                 target = board.piece_at(to_sq)
                 if (target and target.color == enemy) or to_sq == (board.ep_square if board.ep_square is not None else -1):
                     cnt += 1
-        # Forward
         fwd = sq + direction * 8
         if 0 <= fwd < 64 and board.piece_at(fwd) is None:
             cnt += 1
@@ -134,7 +189,7 @@ def piece_mobility(board: chess.Board, sq: int) -> int:
                     cnt += 1
 
     elif pt == chess.KNIGHT:
-        for dr, df in [(-2,-1),(-2,1),(-1,-2),(-1,2),(1,-2),(1,2),(2,-1),(2,1)]:
+        for dr, df in KNIGHT_OFFSETS:
             nr, nf = r + dr, f + df
             if 0 <= nr < 8 and 0 <= nf < 8:
                 target = board.piece_at(nr * 8 + nf)
@@ -180,16 +235,21 @@ def piece_mobility(board: chess.Board, sq: int) -> int:
 # -------------------------------------------------------------------------
 def compute_features(board: chess.Board) -> np.ndarray:
     feat = np.zeros(NF_TOTAL, dtype=np.float64)
+    covW = np.zeros(64, dtype=np.int32)
+    covB = np.zeros(64, dtype=np.int32)
     srcW = np.zeros(64, dtype=np.float64)
     srcB = np.zeros(64, dtype=np.float64)
+    movesW = []
+    movesB = []
     wk_sq = bk_sq = -1
-    n_pawns = n_thermal = 0
+    totalXrayW = totalXrayB = 0
+    Uw = Ub = 0
     pawn_count_w = pawn_count_b = 0
     pawn_adv_w = pawn_adv_b = 0
     pawn_files_w = []
     pawn_files_b = []
 
-    # Pass 1: per-piece entropy s_i = f_i * ln(2 + m_i)
+    # Pass 1: per-piece metrics
     for sq in range(64):
         piece = board.piece_at(sq)
         if piece is None:
@@ -205,10 +265,24 @@ def compute_features(board: chess.Board) -> np.ndarray:
                 bk_sq = sq
 
         fi = xray_mobility(pt, sq, color)
-        si = fi * math.log(2 + fi)
+        add_xray_squares(pt, sq, color, covW if color == chess.WHITE else covB)
+
+        if color == chess.WHITE:
+            srcW[sq] = fi
+            totalXrayW += fi
+        else:
+            srcB[sq] = fi
+            totalXrayB += fi
+
+        mi = piece_mobility(board, sq)
+        if color == chess.WHITE:
+            Uw += mi
+            movesW.append(mi)
+        else:
+            Ub += mi
+            movesB.append(mi)
 
         if pt == chess.PAWN:
-            n_pawns += 1
             if color == chess.WHITE:
                 pawn_count_w += 1
                 pawn_adv_w += (sq >> 3) - 1
@@ -217,31 +291,26 @@ def compute_features(board: chess.Board) -> np.ndarray:
                 pawn_count_b += 1
                 pawn_adv_b += 6 - (sq >> 3)
                 pawn_files_b.append(sq & 7)
-        elif pt != chess.KING:
-            n_thermal += 1
 
-        if color == chess.WHITE:
-            srcW[sq] = si
-        else:
-            srcB[sq] = si
+    # U (kinetic energy = legal moves)
+    feat[F_UW] = Uw
+    feat[F_UB] = Ub
 
-    # Pass 2: propagate via Green's function
+    # T (temperature = move concentration)
+    feat[F_TW] = move_concentration(movesW, Uw)
+    feat[F_TB] = move_concentration(movesB, Ub)
+
+    # S (xray redundancy = 1 - distinct/total)
+    unionW = sum(1 for sq in range(64) if covW[sq] > 0)
+    unionB = sum(1 for sq in range(64) if covB[sq] > 0)
+    feat[F_SW] = 1 - unionW / totalXrayW if totalXrayW > 0 else 0
+    feat[F_SB] = 1 - unionB / totalXrayB if totalXrayB > 0 else 0
+
+    # Pass 2: propagate xray sources via Green's function
     rhoW = GREEN @ srcW
     rhoB = GREEN @ srcB
 
-    # Monopole
-    Sw = srcW.sum()
-    Sb = srcB.sum()
-    feat[F_SW] = Sw
-    feat[F_SB] = Sb
-    feat[F_DS] = Sw - Sb
-
-    # Dilution
-    V = 62 - n_pawns
-    N = n_thermal
-    feat[F_T0] = V / N if N > 0 else 99.0
-
-    # Center of entropy
+    # Center of field
     total_src = srcW + srcB
     total_abs = total_src.sum()
     if total_abs < 1e-12:
@@ -280,7 +349,6 @@ def compute_features(board: chess.Board) -> np.ndarray:
         e1x, e1y = 1.0, 0.0
         e2x, e2y = 0.0, 1.0
 
-    # Anchor: e1 points toward rank 8
     if e1y < 0:
         e1x, e1y = -e1x, -e1y
         e2x, e2y = -e2x, -e2y
@@ -319,20 +387,20 @@ def compute_features(board: chess.Board) -> np.ndarray:
         feat[F_ABK] = (rhoW * kb_col).sum()
         feat[F_DBK] = (rhoB * kb_col).sum()
 
-    # Meta-entropy
-    if Sw > 1e-12:
+    # Meta-entropy (over raw xray totals, not log-transformed)
+    if totalXrayW > 1e-12:
         eta = 0.0
         for sq in range(64):
             if srcW[sq] > 0:
-                p = srcW[sq] / Sw
+                p = srcW[sq] / totalXrayW
                 eta -= p * math.log(p)
         feat[F_ETAW] = eta
 
-    if Sb > 1e-12:
+    if totalXrayB > 1e-12:
         eta = 0.0
         for sq in range(64):
             if srcB[sq] > 0:
-                p = srcB[sq] / Sb
+                p = srcB[sq] / totalXrayB
                 eta -= p * math.log(p)
         feat[F_ETAB] = eta
 
@@ -360,7 +428,6 @@ def compute_features(board: chess.Board) -> np.ndarray:
 #  Build quadratic feature vector from raw features
 # -------------------------------------------------------------------------
 def expand_quadratic(feat: np.ndarray) -> np.ndarray:
-    """Expand NF interaction features into NF + NQ (linear + upper-triangle quadratic)."""
     n = len(feat)
     quad = []
     for i in range(n):
@@ -384,15 +451,15 @@ INTERACTION_NAMES = [
 
 def extract_positions(pgn_path, max_games=50000, sample_every=8, skip_opening=10):
     """
-    Extract (interaction_features, T0*DS) pairs from a PGN file.
+    Extract (interaction_features, dF) pairs from a PGN file.
 
     Positions from well-played games sit near thermodynamic equilibrium
-    (F = U - TS ~ 0), so U ~ T*S. We compute T0*DS as the regression
-    target and the 23 interaction features as predictors.
+    (G ~ 0), so PV ~ dF. We compute dF = (Uw - Tw*Sw) - (Ub - Tb*Sb)
+    as the regression target and the 23 interaction features as predictors.
 
     Returns:
         X: array of shape (n_positions, NF + NQ) - expanded interaction features
-        y: array of shape (n_positions,) - T0*DS targets
+        y: array of shape (n_positions,) - dF targets
     """
     features_list = []
     targets = []
@@ -425,7 +492,7 @@ def extract_positions(pgn_path, max_games=50000, sample_every=8, skip_opening=10
                     continue
 
                 feat = compute_features(board)
-                target = feat[F_T0] * feat[F_DS]
+                target = (feat[F_UW] - feat[F_TW] * feat[F_SW]) - (feat[F_UB] - feat[F_TB] * feat[F_SB])
                 interaction = feat[INT_OFF:INT_OFF + NF]
                 expanded = expand_quadratic(interaction)
                 features_list.append(expanded)
@@ -441,7 +508,7 @@ def extract_positions(pgn_path, max_games=50000, sample_every=8, skip_opening=10
 #  Fit and emit weights
 # -------------------------------------------------------------------------
 def fit_weights(X, y):
-    """Fit U = T*DS via ridge regression on interaction features."""
+    """Fit PV = dF via ridge regression on interaction features."""
     from sklearn.preprocessing import StandardScaler
 
     scaler = StandardScaler()
@@ -465,24 +532,24 @@ def fit_weights(X, y):
 
 
 def emit_js(coeffs):
-    """Print the fitted interaction weights as JS code."""
+    """Print the fitted PV weights as JS code."""
     lin = coeffs[:NF]
     quad = coeffs[NF:]
 
-    print("// ---- Fitted interaction weights (U term, OLS on T0*DS) ----")
+    print("// ---- Fitted PV weights (potential energy, OLS on dF) ----")
     print(f"// {NF} linear + {NQ} quadratic = {NF + NQ} parameters")
-    print("// Engine eval = T0*DS - U")
+    print("// Engine eval = dF - PV")
     print()
 
     print("function createSeeded(){")
     print("  const ind=new Individual();")
     print()
-    print("  // Interaction weights (U term)")
+    print("  // PV weights (potential energy)")
     for i in range(NF):
         if abs(lin[i]) > 1e-8:
             print(f"  ind.wLin[{i}]={lin[i]:.6f}; // {INTERACTION_NAMES[i]}")
     print()
-    print("  // Quadratic interaction weights (only non-negligible)")
+    print("  // Quadratic PV weights (only non-negligible)")
     idx = 0
     for i in range(NF):
         for j in range(i, NF):
@@ -499,7 +566,7 @@ def emit_js(coeffs):
 #  Main
 # -------------------------------------------------------------------------
 def main():
-    parser = argparse.ArgumentParser(description="Fit thermodynamic eval weights from PGN")
+    parser = argparse.ArgumentParser(description="Fit thermodynamic PV weights from PGN")
     parser.add_argument("pgn", help="Path to PGN file")
     parser.add_argument("--max-games", type=int, default=50000,
                         help="Maximum games to process (default: 50000)")
@@ -516,14 +583,23 @@ def main():
         print("ERROR: Too few positions extracted. Need at least 100.", file=sys.stderr)
         sys.exit(1)
 
-    print(f"  Target T0*DS: mean={y.mean():.2f}, std={y.std():.2f}", file=sys.stderr)
+    print(f"  Target dF: mean={y.mean():.2f}, std={y.std():.2f}", file=sys.stderr)
 
-    print("Fitting interaction energy U = T0*DS...", file=sys.stderr)
+    # Check for NaN/Inf in features or targets
+    if np.any(np.isnan(X)) or np.any(np.isinf(X)):
+        bad_cols = np.where(np.any(np.isnan(X) | np.isinf(X), axis=0))[0]
+        print(f"WARNING: NaN/Inf in feature columns: {bad_cols}", file=sys.stderr)
+        X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+    if np.any(np.isnan(y)) or np.any(np.isinf(y)):
+        print(f"WARNING: NaN/Inf in targets, replacing with 0", file=sys.stderr)
+        y = np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
+
+    print("Fitting PV = dF...", file=sys.stderr)
     coeffs = fit_weights(X, y)
 
     lin = coeffs[:NF]
     ranked = sorted(range(NF), key=lambda i: abs(lin[i]), reverse=True)
-    print("\nTop 10 interaction features by |weight|:", file=sys.stderr)
+    print("\nTop 10 PV features by |weight|:", file=sys.stderr)
     for rank, i in enumerate(ranked[:10]):
         print(f"  {rank+1}. {INTERACTION_NAMES[i]:6s} = {lin[i]:+.4f}", file=sys.stderr)
 

@@ -145,15 +145,14 @@ select{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:6px 10p
       <div class="thermo-dashboard">
         <h3>Thermodynamic State</h3>
         <div class="thermo-grid">
-          <div class="thermo-item"><label>Dilution V/N</label><span id="td-T">-</span></div>
-          <div class="thermo-item"><label>Volume V</label><span id="td-V">-</span></div>
+          <div class="thermo-item"><label>U<sup>w</sup></label><span id="td-Uw">-</span></div>
+          <div class="thermo-item"><label>U<sup>b</sup></label><span id="td-Ub">-</span></div>
+          <div class="thermo-item"><label>T<sup>w</sup></label><span id="td-Tw">-</span></div>
+          <div class="thermo-item"><label>T<sup>b</sup></label><span id="td-Tb">-</span></div>
           <div class="thermo-item"><label>S<sup>w</sup></label><span id="td-Sw">-</span></div>
           <div class="thermo-item"><label>S<sup>b</sup></label><span id="td-Sb">-</span></div>
-          <div class="thermo-item"><label>&Delta;S</label><span id="td-DS">-</span></div>
+          <div class="thermo-item"><label>&Delta;F</label><span id="td-dF">-</span></div>
           <div class="thermo-item"><label>Tension &tau;</label><span id="td-tau">-</span></div>
-          <div class="thermo-item"><label>&eta;<sup>w</sup></label><span id="td-ew">-</span></div>
-          <div class="thermo-item"><label>&eta;<sup>b</sup></label><span id="td-eb">-</span></div>
-          <div class="thermo-item"><label>Particles N</label><span id="td-N">-</span></div>
           <div class="thermo-item"><label>Eval (cp)</label><span id="td-E">-</span></div>
         </div>
       </div>
@@ -186,14 +185,15 @@ const CWK=1,CWQ=2,CBK=4,CBQ=8;
 const GREEN=new Float64Array(4096);
 for(let a=0;a<64;a++)for(let b=0;b<64;b++)GREEN[a*64+b]=1/(1+Math.max(Math.abs((a&7)-(b&7)),Math.abs((a>>3)-(b>>3))));
 const MATE=1e6;
-const NF_TOTAL=27;
-const F_SW=0,F_SB=1,F_DS=2,F_D1W=3,F_D1B=4,F_D2W=5,F_D2B=6;
-const F_Q11W=7,F_Q11B=8,F_Q22W=9,F_Q22B=10,F_Q12W=11,F_Q12B=12;
-const F_AWK=13,F_DWK=14,F_ABK=15,F_DBK=16;
-const F_ETAW=17,F_ETAB=18;
-const F_PW=19,F_PB=20,F_PADVW=21,F_PADVB=22,F_PSPRW=23,F_PSPRB=24;
-const F_TAU=25,F_T0=26;
-const INT_OFF=3;
+const NF_TOTAL=29;
+const F_UW=0,F_UB=1,F_TW=2,F_TB=3,F_SW=4,F_SB=5;
+const F_D1W=6,F_D1B=7,F_D2W=8,F_D2B=9;
+const F_Q11W=10,F_Q11B=11,F_Q22W=12,F_Q22B=13,F_Q12W=14,F_Q12B=15;
+const F_AWK=16,F_DWK=17,F_ABK=18,F_DBK=19;
+const F_ETAW=20,F_ETAB=21;
+const F_PW=22,F_PB=23,F_PADVW=24,F_PADVB=25,F_PSPRW=26,F_PSPRB=27;
+const F_TAU=28;
+const INT_OFF=6;
 const NF=23;
 const NQ=NF*(NF+1)/2;
 
@@ -506,30 +506,94 @@ function xrayMobility(pc,sq,color){
   return c;
 }
 
+function moveConcentration(counts,total){
+  if(total===0)return 0;
+  let H=0;
+  for(let i=0;i<counts.length;i++){
+    if(counts[i]>0){const p=counts[i]/total;H-=p*Math.log(p);}
+  }
+  return total/Math.exp(H);
+}
+
+function addXraySquares(pc,sq,color,covMap){
+  const r=sq>>3,f=sq&7;
+  if(pc===PAWN){
+    const dir=color,nr=r+dir;
+    if(nr>=0&&nr<=7){
+      covMap[nr*8+f]++;
+      if(f>0)covMap[nr*8+f-1]++;
+      if(f<7)covMap[nr*8+f+1]++;
+    }
+    if(r===(color===WHITE?1:6))covMap[(r+dir*2)*8+f]++;
+    return;
+  }
+  if(pc===KNIGHT){
+    for(let i=0;i<8;i++){
+      const nr=r+KNIGHT_DR[i],nf=f+KNIGHT_DF[i];
+      if(nr>=0&&nr<8&&nf>=0&&nf<8)covMap[nr*8+nf]++;
+    }
+    return;
+  }
+  if(pc===KING){
+    for(let dr=-1;dr<=1;dr++)for(let df=-1;df<=1;df++){
+      if(!dr&&!df)continue;
+      const nr=r+dr,nf=f+df;
+      if(nr>=0&&nr<8&&nf>=0&&nf<8)covMap[nr*8+nf]++;
+    }
+    return;
+  }
+  const dirs=pc===BISHOP?[4,5,6,7]:pc===ROOK?[0,1,2,3]:[0,1,2,3,4,5,6,7];
+  for(const d of dirs){
+    let cr=r+SLIDE_DIRS[d][0],cf=f+SLIDE_DIRS[d][1];
+    while(cr>=0&&cr<8&&cf>=0&&cf<8){
+      covMap[cr*8+cf]++;
+      cr+=SLIDE_DIRS[d][0];cf+=SLIDE_DIRS[d][1];
+    }
+  }
+}
+
 function computeFeatures(pos){
   const b=pos.board,feat=new Float64Array(NF_TOTAL);
+  const covW=new Uint8Array(64),covB=new Uint8Array(64);
   const srcW=new Float64Array(64),srcB=new Float64Array(64);
+  const movesW=[],movesB=[];
   let wkSq=-1,bkSq=-1;
-  let nPawns=0,nThermal=0;
+  let totalXrayW=0,totalXrayB=0,Uw=0,Ub=0;
   let pawnCountW=0,pawnCountB=0,pawnAdvW=0,pawnAdvB=0;
   const pawnFilesW=[],pawnFilesB=[];
 
-  // Pass 1: per-piece entropy s_i = f_i * ln(2 + m_i)
+  // Pass 1: per-piece metrics
   for(let sq=0;sq<64;sq++){
     if(!b[sq])continue;
     const apc=Math.abs(b[sq]),color=Math.sign(b[sq]);
     if(apc===KING){if(color===WHITE)wkSq=sq;else bkSq=sq;}
     const fi=xrayMobility(apc,sq,color);
-    const si=fi*Math.log(2+fi);
-    if(apc===PAWN){nPawns++;
+    addXraySquares(apc,sq,color,color===WHITE?covW:covB);
+    if(color===WHITE){srcW[sq]=fi;totalXrayW+=fi;}
+    else{srcB[sq]=fi;totalXrayB+=fi;}
+    const mi=pieceMobility(b,sq,pos.ep);
+    if(color===WHITE){Uw+=mi;movesW.push(mi);}
+    else{Ub+=mi;movesB.push(mi);}
+    if(apc===PAWN){
       if(color===WHITE){pawnCountW++;pawnAdvW+=(sq>>3)-1;pawnFilesW.push(sq&7);}
       else{pawnCountB++;pawnAdvB+=6-(sq>>3);pawnFilesB.push(sq&7);}
-    }else if(apc!==KING){nThermal++;}
-    if(color===WHITE)srcW[sq]=si;
-    else srcB[sq]=si;
+    }
   }
 
-  // Pass 2: propagate sources into fields via lattice Green's function G=1/(1+d)
+  // U (kinetic energy = legal moves)
+  feat[F_UW]=Uw;feat[F_UB]=Ub;
+
+  // T (temperature = move concentration)
+  feat[F_TW]=moveConcentration(movesW,Uw);
+  feat[F_TB]=moveConcentration(movesB,Ub);
+
+  // S (xray redundancy = 1 - distinct/total)
+  let unionW=0,unionB=0;
+  for(let sq=0;sq<64;sq++){if(covW[sq])unionW++;if(covB[sq])unionB++;}
+  feat[F_SW]=totalXrayW>0?1-unionW/totalXrayW:0;
+  feat[F_SB]=totalXrayB>0?1-unionB/totalXrayB:0;
+
+  // Pass 2: propagate xray sources into fields via Green's function
   const rhoW=new Float64Array(64),rhoB=new Float64Array(64);
   for(let x=0;x<64;x++){
     let fw=0,fb=0;
@@ -542,17 +606,7 @@ function computeFeatures(pos){
     rhoW[x]=fw;rhoB[x]=fb;
   }
 
-  // Entropy monopole
-  let Sw=0,Sb=0;
-  for(let sq=0;sq<64;sq++){Sw+=srcW[sq];Sb+=srcB[sq];}
-  feat[F_SW]=Sw;feat[F_SB]=Sb;feat[F_DS]=Sw-Sb;
-
-  // Dilution (specific free volume)
-  const V=62-nPawns;
-  const N=nThermal;
-  feat[F_T0]=N>0?V/N:99;
-
-  // Center of entropy (from source distribution)
+  // Center of field (from xray source distribution)
   let totalAbs=0,cx=0,cy=0;
   for(let sq=0;sq<64;sq++){
     const a=srcW[sq]+srcB[sq];
@@ -619,18 +673,18 @@ function computeFeatures(pos){
     feat[F_AWK]=awk;feat[F_DWK]=dwk;feat[F_ABK]=abk;feat[F_DBK]=dbk;
   }
 
-  // Meta-entropy (entropy values are non-negative by construction)
-  if(Sw>1e-12){
+  // Meta-entropy (distribution of xray DOF across pieces)
+  if(totalXrayW>1e-12){
     let eta=0;
     for(let sq=0;sq<64;sq++){
-      if(srcW[sq]>0){const p=srcW[sq]/Sw;eta-=p*Math.log(p);}
+      if(srcW[sq]>0){const p=srcW[sq]/totalXrayW;eta-=p*Math.log(p);}
     }
     feat[F_ETAW]=eta;
   }
-  if(Sb>1e-12){
+  if(totalXrayB>1e-12){
     let eta=0;
     for(let sq=0;sq<64;sq++){
-      if(srcB[sq]>0){const p=srcB[sq]/Sb;eta-=p*Math.log(p);}
+      if(srcB[sq]>0){const p=srcB[sq]/totalXrayB;eta-=p*Math.log(p);}
     }
     feat[F_ETAB]=eta;
   }
@@ -668,11 +722,12 @@ class Individual{
   setQ(i,j,v){this.wQuad[this.quadIdx(i,j)]=v;}
   getQ(i,j){return this.wQuad[this.quadIdx(i,j)];}
   evaluate(feat){
-    let U=0;
-    for(let i=0;i<NF;i++)U+=this.wLin[i]*feat[i+INT_OFF];
+    const dF=(feat[F_UW]-feat[F_TW]*feat[F_SW])-(feat[F_UB]-feat[F_TB]*feat[F_SB]);
+    let PV=0;
+    for(let i=0;i<NF;i++)PV+=this.wLin[i]*feat[i+INT_OFF];
     let k=0;
-    for(let i=0;i<NF;i++)for(let j=i;j<NF;j++){U+=this.wQuad[k]*feat[i+INT_OFF]*feat[j+INT_OFF];k++;}
-    return feat[F_T0]*feat[F_DS]-U;
+    for(let i=0;i<NF;i++)for(let j=i;j<NF;j++){PV+=this.wQuad[k]*feat[i+INT_OFF]*feat[j+INT_OFF];k++;}
+    return dF-PV;
   }
   l1Quad(){let s=0;for(let i=0;i<NQ;i++)s+=Math.abs(this.wQuad[i]);return s;}
   activeQuad(){let c=0;for(let i=0;i<NQ;i++)if(Math.abs(this.wQuad[i])>0.001)c++;return c;}
@@ -686,8 +741,8 @@ class Individual{
 
 function createSeeded(){
   const ind=new Individual();
-  // Interaction weights (U term). eval = T0*DS - U.
-  // Zero weights → eval = T0*DS (pure entropy/material). Re-fit via OLS.
+  // PV weights (potential energy). eval = dF - PV.
+  // Zero weights → eval = dF (free kinetic energy only). Re-fit via OLS.
 
   return ind;
 }
@@ -1206,9 +1261,8 @@ function renderPlayBoard(){
       if(!pos.board[sq])continue;
       const apc=Math.abs(pos.board[sq]),color=Math.sign(pos.board[sq]);
       const fi=xrayMobility(apc,sq,color);
-      const si=fi*Math.log(2+fi)*color;
       for(let t=0;t<64;t++){
-        heatField[t]+=si*GREEN[t*64+sq];
+        heatField[t]+=fi*color*GREEN[t*64+sq];
       }
     }
   }
@@ -1384,25 +1438,16 @@ function updateDashboard(){
   if(!engineWeights)return;
   const feat=computeFeatures(gamePos);
   const e=engineWeights.evaluate(feat);
-  const TS=feat[F_T0]*feat[F_DS];
+  const dF=(feat[F_UW]-feat[F_TW]*feat[F_SW])-(feat[F_UB]-feat[F_TB]*feat[F_SB]);
 
-  document.getElementById('td-Sw').textContent=feat[F_SW].toFixed(2);
-  document.getElementById('td-Sb').textContent=feat[F_SB].toFixed(2);
-  document.getElementById('td-DS').textContent=feat[F_DS].toFixed(2);
-  document.getElementById('td-T').textContent=feat[F_T0].toFixed(2);
+  document.getElementById('td-Uw').textContent=feat[F_UW].toFixed(0);
+  document.getElementById('td-Ub').textContent=feat[F_UB].toFixed(0);
+  document.getElementById('td-Tw').textContent=feat[F_TW].toFixed(2);
+  document.getElementById('td-Tb').textContent=feat[F_TB].toFixed(2);
+  document.getElementById('td-Sw').textContent=feat[F_SW].toFixed(3);
+  document.getElementById('td-Sb').textContent=feat[F_SB].toFixed(3);
+  document.getElementById('td-dF').textContent=dF.toFixed(1);
   document.getElementById('td-tau').textContent=feat[F_TAU].toFixed(2);
-  document.getElementById('td-ew').textContent=feat[F_ETAW].toFixed(2);
-  document.getElementById('td-eb').textContent=feat[F_ETAB].toFixed(2);
-
-  let nPawns=0,nThermal=0;
-  for(let sq=0;sq<64;sq++){
-    if(!gamePos.board[sq])continue;
-    const a=Math.abs(gamePos.board[sq]);
-    if(a===PAWN)nPawns++;
-    else if(a!==KING)nThermal++;
-  }
-  document.getElementById('td-V').textContent=(62-nPawns);
-  document.getElementById('td-N').textContent=nThermal;
   document.getElementById('td-E').textContent=e.toFixed(0);
 
   const evalCp=Math.max(-1000,Math.min(1000,e));

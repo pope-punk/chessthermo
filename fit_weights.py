@@ -204,9 +204,8 @@ def compute_features(board: chess.Board) -> np.ndarray:
             else:
                 bk_sq = sq
 
-        mob = piece_mobility(board, sq)
         fi = xray_mobility(pt, sq, color)
-        si = fi * math.log(2 + mob)
+        si = fi * math.log(2 + fi)
 
         if pt == chess.PAWN:
             n_pawns += 1

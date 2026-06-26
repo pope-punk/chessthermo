@@ -519,9 +519,8 @@ function computeFeatures(pos){
     if(!b[sq])continue;
     const apc=Math.abs(b[sq]),color=Math.sign(b[sq]);
     if(apc===KING){if(color===WHITE)wkSq=sq;else bkSq=sq;}
-    const mob=pieceMobility(b,sq,pos.ep);
     const fi=xrayMobility(apc,sq,color);
-    const si=fi*Math.log(2+mob);
+    const si=fi*Math.log(2+fi);
     if(apc===PAWN){nPawns++;
       if(color===WHITE){pawnCountW++;pawnAdvW+=(sq>>3)-1;pawnFilesW.push(sq&7);}
       else{pawnCountB++;pawnAdvB+=6-(sq>>3);pawnFilesB.push(sq&7);}
@@ -1206,9 +1205,8 @@ function renderPlayBoard(){
     for(let sq=0;sq<64;sq++){
       if(!pos.board[sq])continue;
       const apc=Math.abs(pos.board[sq]),color=Math.sign(pos.board[sq]);
-      const mob=pieceMobility(pos.board,sq,pos.ep);
       const fi=xrayMobility(apc,sq,color);
-      const si=fi*Math.log(2+mob)*color;
+      const si=fi*Math.log(2+fi)*color;
       for(let t=0;t<64;t++){
         heatField[t]+=si*GREEN[t*64+sq];
       }

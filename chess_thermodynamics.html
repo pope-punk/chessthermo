@@ -147,7 +147,7 @@ select{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:6px 10p
       <div class="thermo-dashboard">
         <h3>Thermodynamic State</h3>
         <div class="thermo-grid">
-          <div class="thermo-item"><label>Temperature T</label><span id="td-T">-</span></div>
+          <div class="thermo-item"><label>Dilution V/N</label><span id="td-T">-</span></div>
           <div class="thermo-item"><label>Volume V</label><span id="td-V">-</span></div>
           <div class="thermo-item"><label>S<sup>w</sup></label><span id="td-Sw">-</span></div>
           <div class="thermo-item"><label>S<sup>b</sup></label><span id="td-Sb">-</span></div>
@@ -184,7 +184,7 @@ select{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:6px 10p
 const EMPTY=0,PAWN=1,KNIGHT=2,BISHOP=3,ROOK=4,QUEEN=5,KING=6;
 const WHITE=1,BLACK=-1;
 const CWK=1,CWQ=2,CBK=4,CBQ=8;
-const C_FROZEN=2.0;
+const CHEB=(s1,s2)=>Math.max(Math.abs((s1&7)-(s2&7)),Math.abs((s1>>3)-(s2>>3)));
 const MATE=1e6;
 const NF=27;
 const F_SW=0,F_SB=1,F_DS=2,F_D1W=3,F_D1B=4,F_D2W=5,F_D2B=6;
@@ -468,47 +468,55 @@ function pieceMobility(board,sq,ep){
 
 function computeFeatures(pos,wPawn,wKing){
   const b=pos.board,feat=new Float64Array(NF);
-  const charges=new Float64Array(64);
-  const phiW=new Float64Array(64),phiB=new Float64Array(64);
+  const srcW=new Float64Array(64),srcB=new Float64Array(64);
   let wkSq=-1,bkSq=-1;
   let nPawns=0,nThermal=0;
   let pawnCountW=0,pawnCountB=0,pawnAdvW=0,pawnAdvB=0;
   const pawnFilesW=[],pawnFilesB=[];
 
-  // Pass 1: compute charges and classify pieces
+  // Pass 1: compute source charges q = log(1+m) at piece positions
   for(let sq=0;sq<64;sq++){
     if(!b[sq])continue;
     const apc=Math.abs(b[sq]),color=Math.sign(b[sq]);
-    if(apc===KING){
-      if(color===WHITE)wkSq=sq; else bkSq=sq;
-    }
+    if(apc===KING){if(color===WHITE)wkSq=sq;else bkSq=sq;}
     const mob=pieceMobility(b,sq,pos.ep);
-    const q=mob>0?Math.log(mob):-C_FROZEN;
+    const q=Math.log(1+mob);
     let weight=1.0;
     if(apc===PAWN){weight=wPawn;nPawns++;
       if(color===WHITE){pawnCountW++;pawnAdvW+=(sq>>3)-1;pawnFilesW.push(sq&7);}
       else{pawnCountB++;pawnAdvB+=6-(sq>>3);pawnFilesB.push(sq&7);}
     }else if(apc===KING){weight=wKing;}
     else{nThermal++;}
-    charges[sq]=q;
-    const wq=q*weight;
-    if(color===WHITE)phiW[sq]=wq; else phiB[sq]=wq;
+    if(color===WHITE)srcW[sq]=q*weight;else srcB[sq]=q*weight;
   }
 
-  // Monopole
+  // Pass 2: propagate sources into fields via lattice Green's function G=1/(1+d)
+  const rhoW=new Float64Array(64),rhoB=new Float64Array(64);
+  for(let x=0;x<64;x++){
+    let fw=0,fb=0;
+    for(let s=0;s<64;s++){
+      if(srcW[s]>0||srcB[s]>0){
+        const g=1/(1+CHEB(x,s));
+        fw+=srcW[s]*g;fb+=srcB[s]*g;
+      }
+    }
+    rhoW[x]=fw;rhoB[x]=fb;
+  }
+
+  // Monopole (from source charges, not propagated field)
   let Sw=0,Sb=0;
-  for(let sq=0;sq<64;sq++){Sw+=phiW[sq];Sb+=phiB[sq];}
+  for(let sq=0;sq<64;sq++){Sw+=srcW[sq];Sb+=srcB[sq];}
   feat[F_SW]=Sw;feat[F_SB]=Sb;feat[F_DS]=Sw-Sb;
 
-  // Volume, temperature
+  // Dilution (specific free volume)
   const V=62-nPawns;
   const N=nThermal;
   feat[F_T0]=N>0?V/N:99;
 
-  // Center of entropy
+  // Center of entropy (from source distribution)
   let totalAbs=0,cx=0,cy=0;
   for(let sq=0;sq<64;sq++){
-    const a=Math.abs(phiW[sq]-phiB[sq]);
+    const a=srcW[sq]+srcB[sq];
     if(a>0){cx+=a*(sq&7);cy+=a*(sq>>3);totalAbs+=a;}
   }
   if(totalAbs<1e-12)totalAbs=1;
@@ -517,13 +525,13 @@ function computeFeatures(pos,wPawn,wKing){
   // Inertia tensor
   let I11=0,I12=0,I22=0;
   for(let sq=0;sq<64;sq++){
-    const a=Math.abs(phiW[sq]-phiB[sq]);
+    const a=srcW[sq]+srcB[sq];
     if(a<=0)continue;
     const dx=(sq&7)-cx,dy=(sq>>3)-cy;
     I11+=a*dx*dx;I12+=a*dx*dy;I22+=a*dy*dy;
   }
 
-  // Eigendecomposition of 2x2 symmetric matrix
+  // Eigendecomposition with sign anchoring
   const tr=I11+I22,det=I11*I22-I12*I12;
   const disc=Math.sqrt(Math.max(0,(tr*tr-4*det)));
   const lam1=(tr+disc)/2,lam2=(tr-disc)/2;
@@ -536,54 +544,54 @@ function computeFeatures(pos,wPawn,wKing){
   }else{
     e1x=1;e1y=0;e2x=0;e2y=1;
   }
+  // Anchor: e1 points toward rank 8 (positive y); e2 is right-handed
+  if(e1y<0){e1x=-e1x;e1y=-e1y;e2x=-e2x;e2y=-e2y;}
 
-  // Dipole and quadrupole moments in eigenbasis
+  // Dipole and quadrupole moments in eigenbasis (from source charges)
   let d1w=0,d1b=0,d2w=0,d2b=0;
   let q11w=0,q11b=0,q22w=0,q22b=0,q12w=0,q12b=0;
   for(let sq=0;sq<64;sq++){
+    const sw=srcW[sq],sb=srcB[sq];
+    if(sw<=0&&sb<=0)continue;
     const dx=(sq&7)-cx,dy=(sq>>3)-cy;
     const u1=dx*e1x+dy*e1y;
     const u2=dx*e2x+dy*e2y;
-    if(phiW[sq]>0){
-      d1w+=phiW[sq]*u1;d2w+=phiW[sq]*u2;
-      q11w+=phiW[sq]*u1*u1;q22w+=phiW[sq]*u2*u2;q12w+=phiW[sq]*u1*u2;
+    if(sw>0){
+      d1w+=sw*u1;d2w+=sw*u2;
+      q11w+=sw*u1*u1;q22w+=sw*u2*u2;q12w+=sw*u1*u2;
     }
-    if(phiB[sq]>0){
-      d1b+=phiB[sq]*u1;d2b+=phiB[sq]*u2;
-      q11b+=phiB[sq]*u1*u1;q22b+=phiB[sq]*u2*u2;q12b+=phiB[sq]*u1*u2;
+    if(sb>0){
+      d1b+=sb*u1;d2b+=sb*u2;
+      q11b+=sb*u1*u1;q22b+=sb*u2*u2;q12b+=sb*u1*u2;
     }
   }
   feat[F_D1W]=d1w;feat[F_D1B]=d1b;feat[F_D2W]=d2w;feat[F_D2B]=d2b;
   feat[F_Q11W]=q11w;feat[F_Q11B]=q11b;feat[F_Q22W]=q22w;feat[F_Q22B]=q22b;
   feat[F_Q12W]=q12w;feat[F_Q12B]=q12b;
 
-  // King-field coupling
+  // King-field coupling (from propagated fields)
   if(wkSq>=0&&bkSq>=0){
     let awk=0,dwk=0,abk=0,dbk=0;
     for(let sq=0;sq<64;sq++){
-      const dw=Math.max(Math.abs((sq&7)-(wkSq&7)),Math.abs((sq>>3)-(wkSq>>3)));
-      const db=Math.max(Math.abs((sq&7)-(bkSq&7)),Math.abs((sq>>3)-(bkSq>>3)));
-      const kw=1/(1+dw),kb=1/(1+db);
-      awk+=phiB[sq]*kw;dwk+=phiW[sq]*kw;
-      abk+=phiW[sq]*kb;dbk+=phiB[sq]*kb;
+      const kw=1/(1+CHEB(sq,wkSq)),kb=1/(1+CHEB(sq,bkSq));
+      awk+=rhoB[sq]*kw;dwk+=rhoW[sq]*kw;
+      abk+=rhoW[sq]*kb;dbk+=rhoB[sq]*kb;
     }
     feat[F_AWK]=awk;feat[F_DWK]=dwk;feat[F_ABK]=abk;feat[F_DBK]=dbk;
   }
 
-  // Meta-entropy (uses absolute charges for well-defined probabilities)
-  let totalAbsW=0,totalAbsB=0;
-  for(let sq=0;sq<64;sq++){if(phiW[sq])totalAbsW+=Math.abs(phiW[sq]);if(phiB[sq])totalAbsB+=Math.abs(phiB[sq]);}
-  if(totalAbsW>1e-12){
+  // Meta-entropy (charges are non-negative by construction with log(1+m))
+  if(Sw>1e-12){
     let eta=0;
     for(let sq=0;sq<64;sq++){
-      if(phiW[sq]){const p=Math.abs(phiW[sq])/totalAbsW;eta-=p*Math.log(p);}
+      if(srcW[sq]>0){const p=srcW[sq]/Sw;eta-=p*Math.log(p);}
     }
     feat[F_ETAW]=eta;
   }
-  if(totalAbsB>1e-12){
+  if(Sb>1e-12){
     let eta=0;
     for(let sq=0;sq<64;sq++){
-      if(phiB[sq]){const p=Math.abs(phiB[sq])/totalAbsB;eta-=p*Math.log(p);}
+      if(srcB[sq]>0){const p=srcB[sq]/Sb;eta-=p*Math.log(p);}
     }
     feat[F_ETAB]=eta;
   }
@@ -600,16 +608,9 @@ function computeFeatures(pos,wPawn,wKing){
     feat[F_PSPRB]=pawnFilesB.reduce((a,b)=>a+(b-m)*(b-m),0)/pawnFilesB.length;
   }
 
-  // Spatial tension
+  // Spatial tension (overlap integral of opposing propagated fields)
   let tau=0;
-  for(let s1=0;s1<64;s1++){
-    if(phiW[s1]<=0)continue;
-    for(let s2=0;s2<64;s2++){
-      if(phiB[s2]<=0)continue;
-      const d=Math.max(Math.abs((s1&7)-(s2&7)),Math.abs((s1>>3)-(s2>>3)));
-      tau+=phiW[s1]*phiB[s2]/(1+d);
-    }
-  }
+  for(let x=0;x<64;x++)tau+=rhoW[x]*rhoB[x];
   feat[F_TAU]=tau;
 
   return feat;
@@ -649,14 +650,14 @@ class Individual{
 function createSeeded(){
   const ind=new Individual();
   ind.wLin[F_DS]=80;
-  ind.wLin[F_AWK]=-25;ind.wLin[F_ABK]=25;
-  ind.wLin[F_DWK]=12;ind.wLin[F_DBK]=-12;
+  ind.wLin[F_AWK]=-8;ind.wLin[F_ABK]=8;
+  ind.wLin[F_DWK]=4;ind.wLin[F_DBK]=-4;
   ind.wLin[F_ETAW]=8;ind.wLin[F_ETAB]=-8;
   ind.wLin[F_PADVW]=5;ind.wLin[F_PADVB]=-5;
   ind.wLin[F_PW]=15;ind.wLin[F_PB]=-15;
-  ind.wLin[F_TAU]=2;
+  ind.wLin[F_TAU]=0.5;
   ind.setQ(F_DS,F_T0,1.5);
-  ind.setQ(F_ABK,F_T0,1.0);
+  ind.setQ(F_ABK,F_T0,0.3);
   ind.setQ(F_D1W,F_D1B,-0.8);
   return ind;
 }
@@ -1046,16 +1047,14 @@ function renderPlayBoard(){
     for(let sq=0;sq<64;sq++){
       if(!pos.board[sq])continue;
       const mob=pieceMobility(pos.board,sq,pos.ep);
-      const q=mob>0?Math.log(mob):-C_FROZEN;
+      const q=Math.log(1+mob);
       const apc=Math.abs(pos.board[sq]),color=Math.sign(pos.board[sq]);
       let w=1;
       if(apc===PAWN)w=engineWeights.wPawn;
       else if(apc===KING)w=engineWeights.wKing;
       const charge=q*w*color;
-      // Spread entropy influence to nearby squares using 1/(1+d) kernel
       for(let t=0;t<64;t++){
-        const d=Math.max(Math.abs((t&7)-(sq&7)),Math.abs((t>>3)-(sq>>3)));
-        heatField[t]+=charge/(1+d);
+        heatField[t]+=charge/(1+CHEB(t,sq));
       }
     }
   }

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Fit the thermodynamic evaluation weights from a PGN database.
+Fit the thermodynamic interaction weights from a PGN database.
 
 Reimplements the DOF-entropy feature extraction from
-chess_thermodynamics.html, then fits the equation of state
-(27 linear + 378 quadratic = 405 parameters) via logistic
-regression on game outcomes.
+chess_thermodynamics.html, then fits the interaction energy U
+such that U = T*S on positions from well-played games (F = U - TS = 0
+at thermodynamic equilibrium). Uses ordinary least squares regression.
 
 Requirements:
     pip install python-chess scikit-learn numpy
@@ -18,7 +18,8 @@ Recommended data source:
     Download a monthly PGN file, decompress with: pzstd -d file.pgn.zst
 
 Output:
-    Prints fitted weights as JS code to paste into createSeeded() in the HTML.
+    Prints fitted interaction weights as JS code to paste into
+    createSeeded() in the HTML. Engine eval = T*DS - U.
 """
 
 import sys
@@ -27,15 +28,17 @@ import argparse
 import numpy as np
 import chess
 import chess.pgn
-from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import Ridge
 
 # -------------------------------------------------------------------------
 #  Constants matching the JS engine
 # -------------------------------------------------------------------------
-NF = 27
-NQ = NF * (NF + 1) // 2
+NF_TOTAL = 27
+NF = 23  # interaction features (indices 3..25 of full feature vector)
+NQ = NF * (NF + 1) // 2  # 276
+INT_OFF = 3  # offset into full feature array
 
-# Feature indices
+# Full feature indices (for compute_features, which returns 27 values)
 F_SW, F_SB, F_DS = 0, 1, 2
 F_D1W, F_D1B, F_D2W, F_D2B = 3, 4, 5, 6
 F_Q11W, F_Q11B, F_Q22W, F_Q22B, F_Q12W, F_Q12B = 7, 8, 9, 10, 11, 12
@@ -176,7 +179,7 @@ def piece_mobility(board: chess.Board, sq: int) -> int:
 #  Feature extraction (matches JS computeFeatures exactly)
 # -------------------------------------------------------------------------
 def compute_features(board: chess.Board) -> np.ndarray:
-    feat = np.zeros(NF, dtype=np.float64)
+    feat = np.zeros(NF_TOTAL, dtype=np.float64)
     srcW = np.zeros(64, dtype=np.float64)
     srcB = np.zeros(64, dtype=np.float64)
     wk_sq = bk_sq = -1
@@ -358,43 +361,42 @@ def compute_features(board: chess.Board) -> np.ndarray:
 #  Build quadratic feature vector from raw features
 # -------------------------------------------------------------------------
 def expand_quadratic(feat: np.ndarray) -> np.ndarray:
-    """Expand NF features into NF + NQ features (linear + upper-triangle quadratic)."""
+    """Expand NF interaction features into NF + NQ (linear + upper-triangle quadratic)."""
+    n = len(feat)
     quad = []
-    for i in range(NF):
-        for j in range(i, NF):
+    for i in range(n):
+        for j in range(i, n):
             quad.append(feat[i] * feat[j])
     return np.concatenate([feat, np.array(quad)])
 
 
 # -------------------------------------------------------------------------
-#  Extract labeled positions from a PGN file
+#  Extract positions from a PGN file
 # -------------------------------------------------------------------------
-FEATURE_NAMES = [
-    "SW", "SB", "DS", "D1W", "D1B", "D2W", "D2B",
+INTERACTION_NAMES = [
+    "D1W", "D1B", "D2W", "D2B",
     "Q11W", "Q11B", "Q22W", "Q22B", "Q12W", "Q12B",
     "AWK", "DWK", "ABK", "DBK",
     "ETAW", "ETAB",
     "PW", "PB", "PADVW", "PADVB", "PSPRW", "PSPRB",
-    "TAU", "T0"
+    "TAU"
 ]
 
 
 def extract_positions(pgn_path, max_games=50000, sample_every=8, skip_opening=10):
     """
-    Parse PGN, replay games, sample positions, compute features.
+    Extract (interaction_features, T0*DS) pairs from a PGN file.
 
-    Args:
-        pgn_path: Path to PGN file
-        max_games: Maximum games to process
-        sample_every: Sample one position every N half-moves
-        skip_opening: Skip the first N half-moves (opening book)
+    Positions from well-played games sit near thermodynamic equilibrium
+    (F = U - TS ~ 0), so U ~ T*S. We compute T0*DS as the regression
+    target and the 23 interaction features as predictors.
 
     Returns:
-        X: array of shape (n_positions, 405) - expanded feature vectors
-        y: array of shape (n_positions,) - game results (1.0/0.5/0.0 from White's POV)
+        X: array of shape (n_positions, NF + NQ) - expanded interaction features
+        y: array of shape (n_positions,) - T0*DS targets
     """
     features_list = []
-    labels = []
+    targets = []
 
     with open(pgn_path, "r", errors="replace") as pgn_file:
         game_count = 0
@@ -403,23 +405,15 @@ def extract_positions(pgn_path, max_games=50000, sample_every=8, skip_opening=10
             if game is None:
                 break
 
-            # Parse result
             result = game.headers.get("Result", "*")
-            if result == "1-0":
-                label = 1.0
-            elif result == "0-1":
-                label = 0.0
-            elif result == "1/2-1/2":
-                label = 0.5
-            else:
-                continue  # Skip unfinished games
+            if result == "*":
+                continue
 
             game_count += 1
             if game_count % 1000 == 0:
                 print(f"  Processed {game_count} games, {len(features_list)} positions...",
                       file=sys.stderr)
 
-            # Replay moves and sample positions
             board = game.board()
             ply = 0
             for move in game.mainline_moves():
@@ -431,14 +425,15 @@ def extract_positions(pgn_path, max_games=50000, sample_every=8, skip_opening=10
                 if ply % sample_every != 0:
                     continue
 
-                # Compute features and expand
                 feat = compute_features(board)
-                expanded = expand_quadratic(feat)
+                target = feat[F_T0] * feat[F_DS]
+                interaction = feat[INT_OFF:INT_OFF + NF]
+                expanded = expand_quadratic(interaction)
                 features_list.append(expanded)
-                labels.append(label)
+                targets.append(target)
 
     X = np.array(features_list, dtype=np.float64)
-    y = np.array(labels, dtype=np.float64)
+    y = np.array(targets, dtype=np.float64)
     print(f"  Total: {game_count} games, {len(y)} positions extracted.", file=sys.stderr)
     return X, y
 
@@ -447,107 +442,58 @@ def extract_positions(pgn_path, max_games=50000, sample_every=8, skip_opening=10
 #  Fit and emit weights
 # -------------------------------------------------------------------------
 def fit_weights(X, y):
-    """Fit logistic regression: P(white wins) = sigmoid(w . x)."""
+    """Fit U = T*DS via ridge regression on interaction features."""
     from sklearn.preprocessing import StandardScaler
 
-    # Normalize features for stable optimization, then rescale coefficients back
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
-    # Convert 0/0.5/1 labels to binary for logistic regression
-    # Draws become both win and loss with weight 0.5
-    n = len(y)
-    X_fit = []
-    y_fit = []
-    w_fit = []
+    print(f"  Fitting ridge regression: {len(y)} samples, "
+          f"{X_scaled.shape[1]} features...", file=sys.stderr)
 
-    for i in range(n):
-        if y[i] == 0.5:
-            X_fit.append(X_scaled[i])
-            y_fit.append(1)
-            w_fit.append(0.5)
-            X_fit.append(X_scaled[i])
-            y_fit.append(0)
-            w_fit.append(0.5)
-        else:
-            X_fit.append(X_scaled[i])
-            y_fit.append(int(y[i]))
-            w_fit.append(1.0)
+    model = Ridge(alpha=1.0, fit_intercept=False)
+    model.fit(X_scaled, y)
 
-    X_fit = np.array(X_fit)
-    y_fit = np.array(y_fit)
-    w_fit = np.array(w_fit)
-
-    print(f"  Fitting logistic regression on {len(y_fit)} samples "
-          f"({X_fit.shape[1]} features)...", file=sys.stderr)
-
-    model = LogisticRegression(
-        max_iter=5000,
-        C=0.1,
-        solver="lbfgs",
-        fit_intercept=False,
-        verbose=1,
-    )
-    model.fit(X_fit, y_fit, sample_weight=w_fit)
-
-    # Rescale coefficients back to original feature space
-    coeffs_scaled = model.coef_[0]
     scale = scaler.scale_
     scale[scale < 1e-12] = 1.0
-    coeffs = coeffs_scaled / scale
+    coeffs = model.coef_ / scale
 
-    print(f"  Converged. Coefficient norm (original space): "
-          f"{np.linalg.norm(coeffs):.4f}", file=sys.stderr)
+    r2 = model.score(X_scaled, y)
+    residuals = y - X @ coeffs
+    rmse = np.sqrt(np.mean(residuals ** 2))
+    print(f"  R² = {r2:.4f}, RMSE = {rmse:.2f}", file=sys.stderr)
     return coeffs
 
 
 def emit_js(coeffs):
-    """Print the fitted weights as JS code for the HTML file."""
+    """Print the fitted interaction weights as JS code."""
     lin = coeffs[:NF]
     quad = coeffs[NF:]
 
-    print("// ---- Fitted weights from PGN database (DOF-entropy paradigm) ----")
+    print("// ---- Fitted interaction weights (U term, OLS on T0*DS) ----")
     print(f"// {NF} linear + {NQ} quadratic = {NF + NQ} parameters")
+    print("// Engine eval = T0*DS - U")
     print()
 
     print("function createSeeded(){")
     print("  const ind=new Individual();")
     print()
-    print("  // Linear weights")
+    print("  // Interaction weights (U term)")
     for i in range(NF):
         if abs(lin[i]) > 1e-8:
-            print(f"  ind.wLin[{i}]={lin[i]:.6f}; // {FEATURE_NAMES[i]}")
+            print(f"  ind.wLin[{i}]={lin[i]:.6f}; // {INTERACTION_NAMES[i]}")
     print()
-    print("  // Quadratic weights (only non-negligible)")
+    print("  // Quadratic interaction weights (only non-negligible)")
     idx = 0
     for i in range(NF):
         for j in range(i, NF):
             if abs(quad[idx]) > 1e-6:
                 print(f"  ind.setQ({i},{j},{quad[idx]:.6f}); "
-                      f"// {FEATURE_NAMES[i]}*{FEATURE_NAMES[j]}")
+                      f"// {INTERACTION_NAMES[i]}*{INTERACTION_NAMES[j]}")
             idx += 1
-    print()
-    print("  // Scale from logistic regression units to centipawn-range units.")
-    print("  const K=400;")
-    print("  for(let i=0;i<NF;i++)ind.wLin[i]*=K;")
-    print("  for(let i=0;i<NQ;i++)ind.wQuad[i]*=K;")
     print()
     print("  return ind;")
     print("}")
-
-    # Also emit as compact arrays for easy pasting
-    print()
-    print("// ---- Compact array form ----")
-    print("// ind.wLin = new Float64Array([")
-    for i in range(0, NF, 9):
-        chunk = lin[i:i+9]
-        print("//   " + ",".join(f"{v:.6f}" for v in chunk) + ",")
-    print("// ]);")
-    print("// ind.wQuad = new Float64Array([")
-    for i in range(0, NQ, 10):
-        chunk = quad[i:i+10]
-        print("//   " + ",".join(f"{v:.6f}" for v in chunk) + ",")
-    print("// ]);")
 
 
 # -------------------------------------------------------------------------
@@ -571,21 +517,16 @@ def main():
         print("ERROR: Too few positions extracted. Need at least 100.", file=sys.stderr)
         sys.exit(1)
 
-    # Report class balance
-    wins = (y == 1.0).sum()
-    draws = (y == 0.5).sum()
-    losses = (y == 0.0).sum()
-    print(f"  Results: {wins} White wins, {draws} draws, {losses} Black wins", file=sys.stderr)
+    print(f"  Target T0*DS: mean={y.mean():.2f}, std={y.std():.2f}", file=sys.stderr)
 
-    print("Fitting equation of state...", file=sys.stderr)
+    print("Fitting interaction energy U = T0*DS...", file=sys.stderr)
     coeffs = fit_weights(X, y)
 
-    # Report feature importance (top 10 linear)
     lin = coeffs[:NF]
     ranked = sorted(range(NF), key=lambda i: abs(lin[i]), reverse=True)
-    print("\nTop 10 linear features by |weight|:", file=sys.stderr)
+    print("\nTop 10 interaction features by |weight|:", file=sys.stderr)
     for rank, i in enumerate(ranked[:10]):
-        print(f"  {rank+1}. {FEATURE_NAMES[i]:6s} = {lin[i]:+.4f}", file=sys.stderr)
+        print(f"  {rank+1}. {INTERACTION_NAMES[i]:6s} = {lin[i]:+.4f}", file=sys.stderr)
 
     print("\n--- JS output below ---\n", file=sys.stderr)
     emit_js(coeffs)

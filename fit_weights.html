@@ -61,8 +61,6 @@ input[type=file]{display:none}
   <div><label>Max games</label><br><input id="max-games" type="number" value="50000" min="100" max="500000"></div>
   <div><label>Sample every N ply</label><br><input id="sample-every" type="number" value="8" min="1" max="32"></div>
   <div><label>Skip opening ply</label><br><input id="skip-opening" type="number" value="10" min="0" max="40"></div>
-  <div><label>Learning rate</label><br><input id="lr" type="number" value="0.01" step="0.001" min="0.001" max="0.1"></div>
-  <div><label>Epochs</label><br><input id="epochs" type="number" value="200" min="10" max="2000"></div>
 </div>
 
 <div id="progress-area">
@@ -95,11 +93,12 @@ const GREEN=new Float64Array(4096);
 for(let a=0;a<64;a++)for(let b=0;b<64;b++)
   GREEN[a*64+b]=1/(1+Math.max(Math.abs((a&7)-(b&7)),Math.abs((a>>3)-(b>>3))));
 
-const NF=27,NQ=NF*(NF+1)/2,NTOTAL=NF+NQ;
-const FEAT_NAMES=["SW","SB","DS","D1W","D1B","D2W","D2B",
+const NF_TOTAL=27,INT_OFF=3,NF=23,NQ=NF*(NF+1)/2,NTOTAL=NF+NQ;
+const F_DS=2,F_T0=26;
+const INT_NAMES=["D1W","D1B","D2W","D2B",
   "Q11W","Q11B","Q22W","Q22B","Q12W","Q12B",
   "AWK","DWK","ABK","DBK","ETAW","ETAB",
-  "PW","PB","PADVW","PADVB","PSPRW","PSPRB","TAU","T0"];
+  "PW","PB","PADVW","PADVB","PSPRW","PSPRB","TAU"];
 
 const KNIGHT_DR=[-2,-2,-1,-1,1,1,2,2],KNIGHT_DF=[-1,1,-2,2,-2,2,-1,1];
 const SLIDE_DIRS=[[0,1],[0,-1],[1,0],[-1,0],[1,1],[1,-1],[-1,1],[-1,-1]];
@@ -342,7 +341,7 @@ function xrayMobility(pc,sq,color){
 }
 
 function computeFeatures(pos){
-  const b=pos.board,feat=new Float64Array(NF);
+  const b=pos.board,feat=new Float64Array(NF_TOTAL);
   const srcW=new Float64Array(64),srcB=new Float64Array(64);
   let wkSq=-1,bkSq=-1,nPawns=0,nThermal=0;
   let pcW=0,pcB=0,paW=0,paB=0;
@@ -438,10 +437,10 @@ function computeFeatures(pos){
   return feat;
 }
 
-function expandQuad(feat){
-  const out=new Float64Array(NTOTAL);out.set(feat);
+function expandQuad(intFeat){
+  const out=new Float64Array(NTOTAL);out.set(intFeat);
   let idx=NF;
-  for(let i=0;i<NF;i++)for(let j=i;j<NF;j++)out[idx++]=feat[i]*feat[j];
+  for(let i=0;i<NF;i++)for(let j=i;j<NF;j++)out[idx++]=intFeat[i]*intFeat[j];
   return out;
 }
 
@@ -484,33 +483,26 @@ function parseSAN(pos,san){
   return candidates.length===1?candidates[0]:null;
 }
 
-// Sigmoid
-function sigmoid(x){return x>20?1:x<-20?0:1/(1+Math.exp(-x));}
-
 // Main worker message handler
 self.onmessage=function(e){
-  const{text,maxGames,sampleEvery,skipOpening,lr,epochs}=e.data;
+  const{text,maxGames,sampleEvery,skipOpening}=e.data;
 
-  // Phase 1: Parse PGN and extract features
+  // Phase 1: Parse PGN and extract interaction features + T0*DS targets
   const X=[],Y=[];
-  let gameCount=0,wins=0,draws=0,losses=0,parseErrors=0;
-  const lines=text.split('\n');
+  let gameCount=0,parseErrors=0;
+  const lines=text.split('\\n');
   let headers={},moveText='',inGame=false;
 
   function processGame(){
     if(!moveText.trim())return;
     const result=headers['Result'];
-    let label;
-    if(result==='1-0'){label=1.0;wins++;}
-    else if(result==='0-1'){label=0.0;losses++;}
-    else if(result==='1/2-1/2'){label=0.5;draws++;}
-    else return;
+    if(!result||result==='*')return;
     gameCount++;
 
-    const tokens=moveText.replace(/\{[^}]*\}/g,' ')
-      .replace(/\([^)]*\)/g,' ')
-      .replace(/\d+\.+/g,' ')
-      .replace(/\s+/g,' ').trim().split(' ')
+    const tokens=moveText.replace(/\\{[^}]*\\}/g,' ')
+      .replace(/\\([^)]*\\)/g,' ')
+      .replace(/\\d+\\.+/g,' ')
+      .replace(/\\s+/g,' ').trim().split(' ')
       .filter(t=>t&&t!=='1-0'&&t!=='0-1'&&t!=='1/2-1/2'&&t!=='*');
 
     const pos=new Position();pos.reset();
@@ -522,8 +514,11 @@ self.onmessage=function(e){
       ply++;
       if(ply<=skipOpening)continue;
       if(ply%sampleEvery!==0)continue;
-      X.push(expandQuad(computeFeatures(pos)));
-      Y.push(label);
+      const feat=computeFeatures(pos);
+      const target=feat[F_T0]*feat[F_DS];
+      const intFeat=feat.slice(INT_OFF,INT_OFF+NF);
+      X.push(expandQuad(intFeat));
+      Y.push(target);
     }
   }
 
@@ -532,7 +527,7 @@ self.onmessage=function(e){
     if(line.startsWith('[')){
       if(inGame&&moveText.trim()){processGame();if(gameCount>=maxGames)break;}
       if(line.startsWith('[Event ')){headers={};moveText='';inGame=true;}
-      const hm=line.match(/\[(\w+)\s+"(.*)"\]/);
+      const hm=line.match(/\\[(\\w+)\\s+"(.*)"\\]/);
       if(hm)headers[hm[1]]=hm[2];
     }else if(line){moveText+=line+' ';}
 
@@ -541,54 +536,64 @@ self.onmessage=function(e){
   }
   if(inGame&&moveText.trim()&&gameCount<maxGames)processGame();
 
-  self.postMessage({type:'parsed',gameCount,wins,draws,losses,parseErrors,positions:X.length});
+  self.postMessage({type:'parsed',gameCount,positions:X.length,parseErrors});
 
   if(X.length<100){self.postMessage({type:'error',msg:'Too few positions ('+X.length+')'});return;}
 
-  // Phase 2: Normalize features
+  // Phase 2: OLS ridge regression (normal equation)
   const n=X.length,d=NTOTAL;
-  const mean=new Float64Array(d),std=new Float64Array(d);
-  for(let j=0;j<d;j++){let s=0;for(let i=0;i<n;i++)s+=X[i][j];mean[j]=s/n;}
-  for(let j=0;j<d;j++){let s=0;for(let i=0;i<n;i++){const v=X[i][j]-mean[j];s+=v*v;}std[j]=Math.sqrt(s/n);if(std[j]<1e-12)std[j]=1;}
-  for(let i=0;i<n;i++)for(let j=0;j<d;j++)X[i][j]=(X[i][j]-mean[j])/std[j];
+  self.postMessage({type:'progress',phase:'fit',pct:0.1,loss:0,epoch:0});
 
-  // Phase 3: Adam optimizer
-  const w=new Float64Array(d);
-  const m=new Float64Array(d),v=new Float64Array(d);
-  const b1=0.9,b2=0.999,eps=1e-8;
-  const grad=new Float64Array(d);
-  let bestLoss=Infinity;
-  const bestW=new Float64Array(d);
-
-  for(let epoch=0;epoch<epochs;epoch++){
-    let loss=0;grad.fill(0);
-    for(let i=0;i<n;i++){
-      let dot=0;for(let j=0;j<d;j++)dot+=w[j]*X[i][j];
-      const p=sigmoid(dot),err=p-Y[i];
-      loss+=-Y[i]*Math.log(p+1e-15)-(1-Y[i])*Math.log(1-p+1e-15);
-      for(let j=0;j<d;j++)grad[j]+=err*X[i][j];
+  // Compute X^T X + alpha*I and X^T y
+  const alpha=1.0;
+  const XtX=new Float64Array(d*d);
+  const Xty=new Float64Array(d);
+  for(let i=0;i<n;i++){
+    const xi=X[i],yi=Y[i];
+    for(let a=0;a<d;a++){
+      Xty[a]+=xi[a]*yi;
+      for(let b=a;b<d;b++){
+        const v=xi[a]*xi[b];
+        XtX[a*d+b]+=v;
+        if(a!==b)XtX[b*d+a]+=v;
+      }
     }
-    loss/=n;
-    let l2=0;for(let j=0;j<d;j++){l2+=w[j]*w[j];grad[j]=grad[j]/n+0.01*w[j];}
-    loss+=0.005*l2;
-    if(loss<bestLoss){bestLoss=loss;bestW.set(w);}
+    if(i%10000===0)self.postMessage({type:'progress',phase:'fit',pct:0.1+0.4*i/n,loss:0,epoch:0});
+  }
+  for(let j=0;j<d;j++)XtX[j*d+j]+=alpha;
 
-    const t=epoch+1;
-    for(let j=0;j<d;j++){
-      m[j]=b1*m[j]+(1-b1)*grad[j];
-      v[j]=b2*v[j]+(1-b2)*grad[j]*grad[j];
-      const mh=m[j]/(1-Math.pow(b1,t)),vh=v[j]/(1-Math.pow(b2,t));
-      w[j]-=lr*mh/(Math.sqrt(vh)+eps);
+  self.postMessage({type:'progress',phase:'fit',pct:0.6,loss:0,epoch:0});
+
+  // Solve via Cholesky decomposition
+  const L=new Float64Array(d*d);
+  for(let i=0;i<d;i++){
+    for(let j=0;j<=i;j++){
+      let s=XtX[i*d+j];
+      for(let k=0;k<j;k++)s-=L[i*d+k]*L[j*d+k];
+      L[i*d+j]=i===j?Math.sqrt(Math.max(s,1e-12)):s/L[j*d+j];
     }
-
-    if(epoch%5===0)self.postMessage({type:'progress',phase:'fit',pct:epoch/epochs,loss,epoch});
   }
 
-  // Rescale to original space
-  const wOrig=new Float64Array(d);
-  for(let j=0;j<d;j++)wOrig[j]=bestW[j]/std[j];
+  self.postMessage({type:'progress',phase:'fit',pct:0.8,loss:0,epoch:0});
 
-  self.postMessage({type:'done',weights:Array.from(wOrig),loss:bestLoss});
+  // Forward solve L*z = Xty
+  const z=new Float64Array(d);
+  for(let i=0;i<d;i++){let s=Xty[i];for(let j=0;j<i;j++)s-=L[i*d+j]*z[j];z[i]=s/L[i*d+i];}
+  // Back solve L^T*w = z
+  const w=new Float64Array(d);
+  for(let i=d-1;i>=0;i--){let s=z[i];for(let j=i+1;j<d;j++)s-=L[j*d+i]*w[j];w[i]=s/L[i*d+i];}
+
+  // Compute R² and RMSE
+  let ssRes=0,ssTot=0,yMean=0;
+  for(let i=0;i<n;i++)yMean+=Y[i];yMean/=n;
+  for(let i=0;i<n;i++){
+    let pred=0;for(let j=0;j<d;j++)pred+=w[j]*X[i][j];
+    ssRes+=(Y[i]-pred)*(Y[i]-pred);
+    ssTot+=(Y[i]-yMean)*(Y[i]-yMean);
+  }
+  const r2=1-ssRes/ssTot,rmse=Math.sqrt(ssRes/n);
+
+  self.postMessage({type:'done',weights:Array.from(w),r2,rmse});
 };
 </script>
 
@@ -596,11 +601,11 @@ self.onmessage=function(e){
      MAIN THREAD (UI only)
      ================================================================ -->
 <script>
-const NF=27,NQ=NF*(NF+1)/2;
-const FEAT_NAMES=["SW","SB","DS","D1W","D1B","D2W","D2B",
+const NF=23,NQ=NF*(NF+1)/2;
+const FEAT_NAMES=["D1W","D1B","D2W","D2B",
   "Q11W","Q11B","Q22W","Q22B","Q12W","Q12B",
   "AWK","DWK","ABK","DBK","ETAW","ETAB",
-  "PW","PB","PADVW","PADVB","PSPRW","PSPRB","TAU","T0"];
+  "PW","PB","PADVW","PADVB","PSPRW","PSPRB","TAU"];
 
 const dropZone=document.getElementById('drop-zone');
 const fileInput=document.getElementById('file-input');
@@ -660,7 +665,6 @@ function handleFile(file){
         statsEl.innerHTML=`
           <div class="stat-row"><span class="stat-label">Games processed</span><span class="stat-value">${d.gameCount}</span></div>
           <div class="stat-row"><span class="stat-label">Positions sampled</span><span class="stat-value">${d.positions}</span></div>
-          <div class="stat-row"><span class="stat-label">White wins / Draws / Black wins</span><span class="stat-value">${d.wins} / ${d.draws} / ${d.losses}</span></div>
           <div class="stat-row"><span class="stat-label">Parse errors (skipped)</span><span class="stat-value">${d.parseErrors}</span></div>
           <div class="stat-row"><span class="stat-label">Parse time</span><span class="stat-value">${elapsed}s</span></div>`;
       }else if(d.type==='error'){
@@ -669,7 +673,8 @@ function handleFile(file){
       }else if(d.type==='done'){
         const elapsed=((performance.now()-t0)/1000).toFixed(1);
         statsEl.innerHTML+=`
-          <div class="stat-row"><span class="stat-label">Final loss</span><span class="stat-value">${d.loss.toFixed(6)}</span></div>
+          <div class="stat-row"><span class="stat-label">R&sup2;</span><span class="stat-value">${d.r2.toFixed(4)}</span></div>
+          <div class="stat-row"><span class="stat-label">RMSE</span><span class="stat-value">${d.rmse.toFixed(2)}</span></div>
           <div class="stat-row"><span class="stat-label">Total time</span><span class="stat-value">${elapsed}s</span></div>`;
         showResults(d.weights);
         progressBar.style.width='100%';
@@ -684,8 +689,6 @@ function handleFile(file){
       maxGames:parseInt(document.getElementById('max-games').value)||50000,
       sampleEvery:parseInt(document.getElementById('sample-every').value)||8,
       skipOpening:parseInt(document.getElementById('skip-opening').value)||10,
-      lr:parseFloat(document.getElementById('lr').value)||0.01,
-      epochs:parseInt(document.getElementById('epochs').value)||200,
     });
   };
   reader.readAsText(file);
@@ -716,13 +719,13 @@ function showResults(weights){
 
 function generateJS(weights){
   const lin=weights.slice(0,NF);
-  let out='function createSeeded(){\n  const ind=new Individual();\n\n';
-  out+='  // Linear weights (DOF-entropy, fitted from PGN database)\n';
+  let out='function createSeeded(){\n  const ind=new Individual();\n';
+  out+='  // Interaction weights (U term, OLS on T0*DS). eval = T0*DS - U.\n';
   for(let i=0;i<NF;i++){
     if(Math.abs(lin[i])>1e-8)
       out+=`  ind.wLin[${i}]=${lin[i].toFixed(6)}; // ${FEAT_NAMES[i]}\n`;
   }
-  out+='\n  // Quadratic weights\n';
+  out+='\n  // Quadratic interaction weights\n';
   let idx=NF;
   for(let i=0;i<NF;i++){
     for(let j=i;j<NF;j++){
@@ -731,10 +734,6 @@ function generateJS(weights){
       idx++;
     }
   }
-  out+='\n  // Scale from logistic regression units to centipawn-range units.\n';
-  out+='  const K=400;\n';
-  out+='  for(let i=0;i<NF;i++)ind.wLin[i]*=K;\n';
-  out+='  for(let i=0;i<NQ;i++)ind.wQuad[i]*=K;\n';
   out+='\n  return ind;\n}';
 
   out+='\n\n// ---- Compact array form ----\n';

@@ -89,7 +89,7 @@ select{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:6px 10p
 <div id="evo-phase">
   <div class="phase-header">
     <h1><span>&#9813;</span> Chess Thermodynamics</h1>
-    <h2>Evolutionary Entropy-Field Engine</h2>
+    <h2>Partition-Function Chess Engine</h2>
   </div>
   <div class="evo-controls">
     <button class="primary" onclick="startEvo('quick')">Quick Train (10 gen)</button>
@@ -106,8 +106,7 @@ select{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:6px 10p
       <div class="stat-row"><span>Generation</span><span class="stat-val" id="st-gen">0 / 0</span></div>
       <div class="stat-row"><span>Games Played</span><span class="stat-val" id="st-games">0</span></div>
       <div class="stat-row"><span>Best Fitness</span><span class="stat-val" id="st-fit">-</span></div>
-      <div class="stat-row"><span>Top Weight: &Delta;S</span><span class="stat-val" id="st-ds">-</span></div>
-      <div class="stat-row"><span>Active Quad Terms</span><span class="stat-val" id="st-aq">-</span></div>
+      <div class="stat-row"><span>Piece Weights</span><span class="stat-val" id="st-pw">-</span></div>
       <div class="progress-bar"><div class="progress-fill" id="evo-prog"></div></div>
     </div>
     <div class="evo-chart-wrap">
@@ -126,7 +125,7 @@ select{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:6px 10p
 <div id="play-phase" style="display:none">
   <div class="phase-header">
     <h1><span>&#9813;</span> Chess Thermodynamics &mdash; <span>Play</span></h1>
-    <h2>You vs the Evolved Engine</h2>
+    <h2>Soft-Minimax &middot; Partition Function Engine</h2>
   </div>
   <div class="play-content">
     <div class="board-panel">
@@ -145,15 +144,14 @@ select{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:6px 10p
       <div class="thermo-dashboard">
         <h3>Thermodynamic State</h3>
         <div class="thermo-grid">
-          <div class="thermo-item"><label>U<sup>w</sup></label><span id="td-Uw">-</span></div>
-          <div class="thermo-item"><label>U<sup>b</sup></label><span id="td-Ub">-</span></div>
-          <div class="thermo-item"><label>T<sup>w</sup></label><span id="td-Tw">-</span></div>
-          <div class="thermo-item"><label>T<sup>b</sup></label><span id="td-Tb">-</span></div>
-          <div class="thermo-item"><label>S<sup>w</sup></label><span id="td-Sw">-</span></div>
-          <div class="thermo-item"><label>S<sup>b</sup></label><span id="td-Sb">-</span></div>
-          <div class="thermo-item"><label>&Delta;F</label><span id="td-dF">-</span></div>
-          <div class="thermo-item"><label>Tension &tau;</label><span id="td-tau">-</span></div>
-          <div class="thermo-item"><label>Eval (pieces)</label><span id="td-E">-</span></div>
+          <div class="thermo-item"><label>U<sup>w</sup> (xray)</label><span id="td-Uw">-</span></div>
+          <div class="thermo-item"><label>U<sup>b</sup> (xray)</label><span id="td-Ub">-</span></div>
+          <div class="thermo-item"><label>F (free energy)</label><span id="td-F">-</span></div>
+          <div class="thermo-item"><label>S (cont. entropy)</label><span id="td-S">-</span></div>
+          <div class="thermo-item"><label>C (spec. heat)</label><span id="td-C">-</span></div>
+          <div class="thermo-item"><label>T (temperature)</label><span id="td-T">-</span></div>
+          <div class="thermo-item"><label>&mu; imbalance</label><span id="td-mu">-</span></div>
+          <div class="thermo-item"><label>Eval (pawns)</label><span id="td-E">-</span></div>
         </div>
       </div>
       <div class="move-list-wrap">
@@ -170,6 +168,16 @@ select{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:6px 10p
           <option value="hard">Hard (~15s)</option>
           <option value="max">Maximum (~60s)</option>
         </select>
+      </div>
+      <div class="toggle-row">
+        <label>T: <input type="range" id="thermo-T" min="0.5" max="20" step="0.5" value="3"
+          oninput="setThermoT(this.value)" style="width:80px;vertical-align:middle">
+          <span id="T-val">3.0</span></label>
+        <label>Depth: <select id="thermo-depth" onchange="setThermoDepth(this.value)">
+          <option value="1">1</option>
+          <option value="2" selected>2</option>
+          <option value="3">3</option>
+        </select></label>
       </div>
     </div>
   </div>
@@ -710,31 +718,46 @@ function computeFeatures(pos){
 }
 
 // =========================================================================
-//  INDIVIDUAL (EVOLVABLE WEIGHT CARRIER)
+//  INDIVIDUAL (EVOLVABLE PIECE-WEIGHT CARRIER)
+//  In the partition-function framework, the leaf evaluator is the "ideal
+//  gas" internal energy: U = Σ w[type] * xray_mobility(piece).
+//  The weights are chemical potentials — they determine each piece type's
+//  contribution per unit of xray reach. Evolution discovers them.
 // =========================================================================
 class Individual{
   constructor(){
-    this.wLin=new Float64Array(NF);
-    this.wQuad=new Float64Array(NQ);
+    this.pieceW=new Float64Array(7); // indexed by piece type constant
+    this.pieceW[PAWN]=1.0;
+    this.pieceW[KNIGHT]=1.0;
+    this.pieceW[BISHOP]=1.0;
+    this.pieceW[ROOK]=1.0;
+    this.pieceW[QUEEN]=1.0;
+    this.pieceW[KING]=1.0;
     this.fitness=0;
   }
-  quadIdx(i,j){if(i>j){const t=i;i=j;j=t;}return i*NF-i*(i-1)/2+(j-i);}
-  setQ(i,j,v){this.wQuad[this.quadIdx(i,j)]=v;}
-  getQ(i,j){return this.wQuad[this.quadIdx(i,j)];}
-  evaluate(feat){
-    const dF=(feat[F_UW]-feat[F_TW]*feat[F_SW])-(feat[F_UB]-feat[F_TB]*feat[F_SB]);
-    let PV=0;
-    for(let i=0;i<NF;i++)PV+=this.wLin[i]*feat[i+INT_OFF];
-    let k=0;
-    for(let i=0;i<NF;i++)for(let j=i;j<NF;j++){PV+=this.wQuad[k]*feat[i+INT_OFF]*feat[j+INT_OFF];k++;}
-    const Tavg=(feat[F_TW]+feat[F_TB])/2||1;
-    return (dF-PV)/Tavg;
+  leafEval(pos){
+    let Uw=0,Ub=0;
+    for(let sq=0;sq<64;sq++){
+      if(!pos.board[sq])continue;
+      const apc=Math.abs(pos.board[sq]),color=Math.sign(pos.board[sq]);
+      const fi=xrayMobility(apc,sq,color);
+      if(color===WHITE)Uw+=this.pieceW[apc]*fi;
+      else Ub+=this.pieceW[apc]*fi;
+    }
+    return pos.turn===WHITE?(Uw-Ub):(Ub-Uw);
   }
-  l1Quad(){let s=0;for(let i=0;i<NQ;i++)s+=Math.abs(this.wQuad[i]);return s;}
-  activeQuad(){let c=0;for(let i=0;i<NQ;i++)if(Math.abs(this.wQuad[i])>0.001)c++;return c;}
+  rawU(pos){
+    let Uw=0,Ub=0;
+    for(let sq=0;sq<64;sq++){
+      if(!pos.board[sq])continue;
+      const fi=xrayMobility(Math.abs(pos.board[sq]),sq,Math.sign(pos.board[sq]));
+      if(Math.sign(pos.board[sq])===WHITE)Uw+=fi; else Ub+=fi;
+    }
+    return {Uw,Ub};
+  }
   clone(){
     const c=new Individual();
-    c.wLin.set(this.wLin);c.wQuad.set(this.wQuad);
+    c.pieceW.set(this.pieceW);
     c.fitness=this.fitness;
     return c;
   }
@@ -742,337 +765,17 @@ class Individual{
 
 function createSeeded(){
   const ind=new Individual();
-  // PV weights (potential energy, OLS on dF). eval = dF - PV.
-  ind.wLin[0]=0.000151; // D1W
-  ind.wLin[1]=-0.000151; // D1B
-  ind.wLin[2]=-0.007195; // D2W
-  ind.wLin[3]=0.007195; // D2B
-  ind.wLin[4]=0.019391; // Q11W
-  ind.wLin[5]=-0.020874; // Q11B
-  ind.wLin[6]=0.017460; // Q22W
-  ind.wLin[7]=-0.018790; // Q22B
-  ind.wLin[8]=0.000357; // Q12W
-  ind.wLin[9]=-0.000357; // Q12B
-  ind.wLin[10]=-0.126834; // AWK
-  ind.wLin[11]=0.063718; // DWK
-  ind.wLin[12]=0.134902; // ABK
-  ind.wLin[13]=-0.072469; // DBK
-  ind.wLin[14]=1.311027; // ETAW
-  ind.wLin[15]=-2.493126; // ETAB
-  ind.wLin[16]=-0.053685; // PW
-  ind.wLin[17]=0.234178; // PB
-  ind.wLin[18]=-0.019285; // PADVW
-  ind.wLin[19]=-0.016781; // PADVB
-  ind.wLin[20]=0.052787; // PSPRW
-  ind.wLin[21]=-0.030760; // PSPRB
-  ind.wLin[22]=0.000119; // TAU
-
-  // Quadratic interaction weights
-  ind.setQ(0,0,0.000013); // D1W*D1W
-  ind.setQ(0,1,-0.000013); // D1W*D1B
-  ind.setQ(0,2,0.000021); // D1W*D2W
-  ind.setQ(0,3,-0.000021); // D1W*D2B
-  ind.setQ(0,4,0.000032); // D1W*Q11W
-  ind.setQ(0,5,-0.000034); // D1W*Q11B
-  ind.setQ(0,6,0.000018); // D1W*Q22W
-  ind.setQ(0,7,-0.000012); // D1W*Q22B
-  ind.setQ(0,8,-0.000002); // D1W*Q12W
-  ind.setQ(0,9,0.000002); // D1W*Q12B
-  ind.setQ(0,10,-0.000039); // D1W*AWK
-  ind.setQ(0,11,0.000039); // D1W*DWK
-  ind.setQ(0,12,0.000054); // D1W*ABK
-  ind.setQ(0,13,-0.000050); // D1W*DBK
-  ind.setQ(0,14,-0.014946); // D1W*ETAW
-  ind.setQ(0,15,0.014011); // D1W*ETAB
-  ind.setQ(0,16,0.000501); // D1W*PW
-  ind.setQ(0,17,-0.000514); // D1W*PB
-  ind.setQ(0,18,0.000165); // D1W*PADVW
-  ind.setQ(0,19,-0.000129); // D1W*PADVB
-  ind.setQ(0,20,-0.000024); // D1W*PSPRW
-  ind.setQ(0,21,0.000144); // D1W*PSPRB
-  ind.setQ(1,1,0.000013); // D1B*D1B
-  ind.setQ(1,2,-0.000021); // D1B*D2W
-  ind.setQ(1,3,0.000021); // D1B*D2B
-  ind.setQ(1,4,-0.000032); // D1B*Q11W
-  ind.setQ(1,5,0.000034); // D1B*Q11B
-  ind.setQ(1,6,-0.000018); // D1B*Q22W
-  ind.setQ(1,7,0.000012); // D1B*Q22B
-  ind.setQ(1,8,0.000002); // D1B*Q12W
-  ind.setQ(1,9,-0.000002); // D1B*Q12B
-  ind.setQ(1,10,0.000039); // D1B*AWK
-  ind.setQ(1,11,-0.000039); // D1B*DWK
-  ind.setQ(1,12,-0.000054); // D1B*ABK
-  ind.setQ(1,13,0.000050); // D1B*DBK
-  ind.setQ(1,14,0.014946); // D1B*ETAW
-  ind.setQ(1,15,-0.014011); // D1B*ETAB
-  ind.setQ(1,16,-0.000501); // D1B*PW
-  ind.setQ(1,17,0.000514); // D1B*PB
-  ind.setQ(1,18,-0.000165); // D1B*PADVW
-  ind.setQ(1,19,0.000129); // D1B*PADVB
-  ind.setQ(1,20,0.000024); // D1B*PSPRW
-  ind.setQ(1,21,-0.000144); // D1B*PSPRB
-  ind.setQ(2,2,0.000014); // D2W*D2W
-  ind.setQ(2,3,-0.000014); // D2W*D2B
-  ind.setQ(2,4,-0.000001); // D2W*Q11W
-  ind.setQ(2,5,-0.000004); // D2W*Q11B
-  ind.setQ(2,6,0.000006); // D2W*Q22W
-  ind.setQ(2,7,0.000013); // D2W*Q22B
-  ind.setQ(2,8,0.000034); // D2W*Q12W
-  ind.setQ(2,9,-0.000034); // D2W*Q12B
-  ind.setQ(2,10,0.000046); // D2W*AWK
-  ind.setQ(2,11,-0.000031); // D2W*DWK
-  ind.setQ(2,12,0.000043); // D2W*ABK
-  ind.setQ(2,13,-0.000033); // D2W*DBK
-  ind.setQ(2,14,-0.000382); // D2W*ETAW
-  ind.setQ(2,15,0.001880); // D2W*ETAB
-  ind.setQ(2,16,-0.000033); // D2W*PW
-  ind.setQ(2,17,-0.000445); // D2W*PB
-  ind.setQ(2,18,0.000099); // D2W*PADVW
-  ind.setQ(2,19,0.000059); // D2W*PADVB
-  ind.setQ(2,20,0.000090); // D2W*PSPRW
-  ind.setQ(2,21,0.000094); // D2W*PSPRB
-  ind.setQ(3,3,0.000014); // D2B*D2B
-  ind.setQ(3,4,0.000001); // D2B*Q11W
-  ind.setQ(3,5,0.000004); // D2B*Q11B
-  ind.setQ(3,6,-0.000006); // D2B*Q22W
-  ind.setQ(3,7,-0.000013); // D2B*Q22B
-  ind.setQ(3,8,-0.000034); // D2B*Q12W
-  ind.setQ(3,9,0.000034); // D2B*Q12B
-  ind.setQ(3,10,-0.000046); // D2B*AWK
-  ind.setQ(3,11,0.000031); // D2B*DWK
-  ind.setQ(3,12,-0.000043); // D2B*ABK
-  ind.setQ(3,13,0.000033); // D2B*DBK
-  ind.setQ(3,14,0.000382); // D2B*ETAW
-  ind.setQ(3,15,-0.001880); // D2B*ETAB
-  ind.setQ(3,16,0.000033); // D2B*PW
-  ind.setQ(3,17,0.000445); // D2B*PB
-  ind.setQ(3,18,-0.000099); // D2B*PADVW
-  ind.setQ(3,19,-0.000059); // D2B*PADVB
-  ind.setQ(3,20,-0.000090); // D2B*PSPRW
-  ind.setQ(3,21,-0.000094); // D2B*PSPRB
-  ind.setQ(4,4,0.000003); // Q11W*Q11W
-  ind.setQ(4,8,0.000008); // Q11W*Q12W
-  ind.setQ(4,9,-0.000008); // Q11W*Q12B
-  ind.setQ(4,10,0.000011); // Q11W*AWK
-  ind.setQ(4,11,-0.000023); // Q11W*DWK
-  ind.setQ(4,12,0.000054); // Q11W*ABK
-  ind.setQ(4,13,-0.000015); // Q11W*DBK
-  ind.setQ(4,14,-0.000059); // Q11W*ETAW
-  ind.setQ(4,15,-0.006143); // Q11W*ETAB
-  ind.setQ(4,16,-0.000414); // Q11W*PW
-  ind.setQ(4,17,0.000580); // Q11W*PB
-  ind.setQ(4,18,0.000071); // Q11W*PADVW
-  ind.setQ(4,19,-0.000167); // Q11W*PADVB
-  ind.setQ(4,20,-0.000065); // Q11W*PSPRW
-  ind.setQ(4,21,-0.000002); // Q11W*PSPRB
-  ind.setQ(5,5,-0.000002); // Q11B*Q11B
-  ind.setQ(5,6,0.000001); // Q11B*Q22W
-  ind.setQ(5,7,-0.000006); // Q11B*Q22B
-  ind.setQ(5,8,-0.000008); // Q11B*Q12W
-  ind.setQ(5,9,0.000008); // Q11B*Q12B
-  ind.setQ(5,10,-0.000037); // Q11B*AWK
-  ind.setQ(5,11,0.000003); // Q11B*DWK
-  ind.setQ(5,12,0.000026); // Q11B*ABK
-  ind.setQ(5,13,-0.000008); // Q11B*DBK
-  ind.setQ(5,14,0.003592); // Q11B*ETAW
-  ind.setQ(5,15,0.002578); // Q11B*ETAB
-  ind.setQ(5,16,-0.000620); // Q11B*PW
-  ind.setQ(5,17,0.000312); // Q11B*PB
-  ind.setQ(5,18,0.000169); // Q11B*PADVW
-  ind.setQ(5,19,-0.000031); // Q11B*PADVB
-  ind.setQ(5,20,-0.000004); // Q11B*PSPRW
-  ind.setQ(5,21,0.000051); // Q11B*PSPRB
-  ind.setQ(6,6,-0.000011); // Q22W*Q22W
-  ind.setQ(6,8,0.000009); // Q22W*Q12W
-  ind.setQ(6,9,-0.000009); // Q22W*Q12B
-  ind.setQ(6,10,-0.000046); // Q22W*AWK
-  ind.setQ(6,11,0.000073); // Q22W*DWK
-  ind.setQ(6,12,-0.000053); // Q22W*ABK
-  ind.setQ(6,13,0.000047); // Q22W*DBK
-  ind.setQ(6,14,0.003492); // Q22W*ETAW
-  ind.setQ(6,15,-0.004560); // Q22W*ETAB
-  ind.setQ(6,16,-0.000148); // Q22W*PW
-  ind.setQ(6,17,0.000058); // Q22W*PB
-  ind.setQ(6,18,0.000018); // Q22W*PADVW
-  ind.setQ(6,19,-0.000131); // Q22W*PADVB
-  ind.setQ(6,20,0.000076); // Q22W*PSPRW
-  ind.setQ(6,21,-0.000057); // Q22W*PSPRB
-  ind.setQ(7,7,0.000013); // Q22B*Q22B
-  ind.setQ(7,8,-0.000010); // Q22B*Q12W
-  ind.setQ(7,9,0.000010); // Q22B*Q12B
-  ind.setQ(7,10,0.000013); // Q22B*AWK
-  ind.setQ(7,11,-0.000023); // Q22B*DWK
-  ind.setQ(7,12,0.000034); // Q22B*ABK
-  ind.setQ(7,13,-0.000063); // Q22B*DBK
-  ind.setQ(7,14,0.003319); // Q22B*ETAW
-  ind.setQ(7,15,0.000528); // Q22B*ETAB
-  ind.setQ(7,16,-0.000159); // Q22B*PW
-  ind.setQ(7,17,0.000133); // Q22B*PB
-  ind.setQ(7,18,0.000039); // Q22B*PADVW
-  ind.setQ(7,19,-0.000003); // Q22B*PADVB
-  ind.setQ(7,20,0.000063); // Q22B*PSPRW
-  ind.setQ(7,21,-0.000125); // Q22B*PSPRB
-  ind.setQ(8,8,0.000003); // Q12W*Q12W
-  ind.setQ(8,9,-0.000003); // Q12W*Q12B
-  ind.setQ(8,10,-0.000023); // Q12W*AWK
-  ind.setQ(8,11,0.000008); // Q12W*DWK
-  ind.setQ(8,12,0.000026); // Q12W*ABK
-  ind.setQ(8,13,-0.000016); // Q12W*DBK
-  ind.setQ(8,14,-0.005729); // Q12W*ETAW
-  ind.setQ(8,15,0.006263); // Q12W*ETAB
-  ind.setQ(8,16,0.000073); // Q12W*PW
-  ind.setQ(8,17,-0.000177); // Q12W*PB
-  ind.setQ(8,18,0.000040); // Q12W*PADVW
-  ind.setQ(8,19,-0.000028); // Q12W*PADVB
-  ind.setQ(8,20,-0.000021); // Q12W*PSPRW
-  ind.setQ(8,21,0.000049); // Q12W*PSPRB
-  ind.setQ(9,9,0.000003); // Q12B*Q12B
-  ind.setQ(9,10,0.000023); // Q12B*AWK
-  ind.setQ(9,11,-0.000008); // Q12B*DWK
-  ind.setQ(9,12,-0.000026); // Q12B*ABK
-  ind.setQ(9,13,0.000016); // Q12B*DBK
-  ind.setQ(9,14,0.005729); // Q12B*ETAW
-  ind.setQ(9,15,-0.006263); // Q12B*ETAB
-  ind.setQ(9,16,-0.000073); // Q12B*PW
-  ind.setQ(9,17,0.000177); // Q12B*PB
-  ind.setQ(9,18,-0.000040); // Q12B*PADVW
-  ind.setQ(9,19,0.000028); // Q12B*PADVB
-  ind.setQ(9,20,0.000021); // Q12B*PSPRW
-  ind.setQ(9,21,-0.000049); // Q12B*PSPRB
-  ind.setQ(10,10,0.000223); // AWK*AWK
-  ind.setQ(10,11,0.000008); // AWK*DWK
-  ind.setQ(10,12,0.000084); // AWK*ABK
-  ind.setQ(10,13,-0.000118); // AWK*DBK
-  ind.setQ(10,14,-0.006256); // AWK*ETAW
-  ind.setQ(10,15,-0.005027); // AWK*ETAB
-  ind.setQ(10,16,-0.007373); // AWK*PW
-  ind.setQ(10,17,0.005885); // AWK*PB
-  ind.setQ(10,18,0.001390); // AWK*PADVW
-  ind.setQ(10,19,-0.000636); // AWK*PADVB
-  ind.setQ(10,20,0.000529); // AWK*PSPRW
-  ind.setQ(10,21,0.000059); // AWK*PSPRB
-  ind.setQ(10,22,-0.000001); // AWK*TAU
-  ind.setQ(11,11,-0.000025); // DWK*DWK
-  ind.setQ(11,12,0.000012); // DWK*ABK
-  ind.setQ(11,13,0.000042); // DWK*DBK
-  ind.setQ(11,14,0.020880); // DWK*ETAW
-  ind.setQ(11,15,-0.002722); // DWK*ETAB
-  ind.setQ(11,16,0.002576); // DWK*PW
-  ind.setQ(11,17,-0.002057); // DWK*PB
-  ind.setQ(11,18,-0.000950); // DWK*PADVW
-  ind.setQ(11,19,0.000485); // DWK*PADVB
-  ind.setQ(11,20,-0.000191); // DWK*PSPRW
-  ind.setQ(11,21,0.000193); // DWK*PSPRB
-  ind.setQ(12,12,-0.000215); // ABK*ABK
-  ind.setQ(12,13,-0.000031); // ABK*DBK
-  ind.setQ(12,14,0.005562); // ABK*ETAW
-  ind.setQ(12,15,-0.001103); // ABK*ETAB
-  ind.setQ(12,16,-0.005286); // ABK*PW
-  ind.setQ(12,17,0.005676); // ABK*PB
-  ind.setQ(12,18,0.000534); // ABK*PADVW
-  ind.setQ(12,19,-0.001149); // ABK*PADVB
-  ind.setQ(12,20,0.000033); // ABK*PSPRW
-  ind.setQ(12,21,-0.000423); // ABK*PSPRB
-  ind.setQ(12,22,0.000001); // ABK*TAU
-  ind.setQ(13,13,0.000045); // DBK*DBK
-  ind.setQ(13,14,-0.009138); // DBK*ETAW
-  ind.setQ(13,15,-0.003711); // DBK*ETAB
-  ind.setQ(13,16,0.002618); // DBK*PW
-  ind.setQ(13,17,-0.001876); // DBK*PB
-  ind.setQ(13,18,-0.000570); // DBK*PADVW
-  ind.setQ(13,19,0.000776); // DBK*PADVB
-  ind.setQ(13,20,-0.000212); // DBK*PSPRW
-  ind.setQ(13,21,-0.000292); // DBK*PSPRB
-  ind.setQ(14,14,-3.776706); // ETAW*ETAW
-  ind.setQ(14,15,1.093162); // ETAW*ETAB
-  ind.setQ(14,16,0.517083); // ETAW*PW
-  ind.setQ(14,17,-0.236959); // ETAW*PB
-  ind.setQ(14,18,0.040573); // ETAW*PADVW
-  ind.setQ(14,19,0.171148); // ETAW*PADVB
-  ind.setQ(14,20,-0.028136); // ETAW*PSPRW
-  ind.setQ(14,21,0.018541); // ETAW*PSPRB
-  ind.setQ(14,22,0.000551); // ETAW*TAU
-  ind.setQ(15,15,3.295492); // ETAB*ETAB
-  ind.setQ(15,16,0.291656); // ETAB*PW
-  ind.setQ(15,17,-0.730350); // ETAB*PB
-  ind.setQ(15,18,-0.126366); // ETAB*PADVW
-  ind.setQ(15,19,-0.029510); // ETAB*PADVB
-  ind.setQ(15,20,-0.031896); // ETAB*PSPRW
-  ind.setQ(15,21,0.070744); // ETAB*PSPRB
-  ind.setQ(15,22,-0.000661); // ETAB*TAU
-  ind.setQ(16,16,0.000781); // PW*PW
-  ind.setQ(16,17,-0.008250); // PW*PB
-  ind.setQ(16,18,-0.003302); // PW*PADVW
-  ind.setQ(16,19,-0.011529); // PW*PADVB
-  ind.setQ(16,20,0.018921); // PW*PSPRW
-  ind.setQ(16,21,-0.001593); // PW*PSPRB
-  ind.setQ(16,22,0.000018); // PW*TAU
-  ind.setQ(17,17,0.014263); // PB*PB
-  ind.setQ(17,18,0.010778); // PB*PADVW
-  ind.setQ(17,19,0.000385); // PB*PADVB
-  ind.setQ(17,20,-0.000329); // PB*PSPRW
-  ind.setQ(17,21,-0.022784); // PB*PSPRB
-  ind.setQ(17,22,-0.000015); // PB*TAU
-  ind.setQ(18,18,-0.000889); // PADVW*PADVW
-  ind.setQ(18,19,-0.000057); // PADVW*PADVB
-  ind.setQ(18,20,-0.001046); // PADVW*PSPRW
-  ind.setQ(18,21,-0.001702); // PADVW*PSPRB
-  ind.setQ(18,22,0.000002); // PADVW*TAU
-  ind.setQ(19,19,0.001409); // PADVB*PADVB
-  ind.setQ(19,20,-0.000454); // PADVB*PSPRW
-  ind.setQ(19,21,-0.001083); // PADVB*PSPRB
-  ind.setQ(20,20,0.001037); // PSPRW*PSPRW
-  ind.setQ(20,21,0.000569); // PSPRW*PSPRB
-  ind.setQ(21,21,0.000227); // PSPRB*PSPRB
-  ind.setQ(21,22,0.000004); // PSPRB*TAU
-
+  // Default chemical potentials (all equal = ideal gas)
   return ind;
 }
 
-// ---- Compact array form ----
-// ind.wLin = new Float64Array([
-//   0.000151,-0.000151,-0.007195,0.007195,0.019391,-0.020874,0.017460,-0.018790,0.000357,
-//   -0.000357,-0.126834,0.063718,0.134902,-0.072469,1.311027,-2.493126,-0.053685,0.234178,
-//   -0.019285,-0.016781,0.052787,-0.030760,0.000119
-// ]);
-// ind.wQuad = new Float64Array([
-//   0.000013,-0.000013,0.000021,-0.000021,0.000032,-0.000034,0.000018,-0.000012,-0.000002,0.000002,
-//   -0.000039,0.000039,0.000054,-0.000050,-0.014946,0.014011,0.000501,-0.000514,0.000165,-0.000129,
-//   -0.000024,0.000144,0.000000,0.000013,-0.000021,0.000021,-0.000032,0.000034,-0.000018,0.000012,
-//   0.000002,-0.000002,0.000039,-0.000039,-0.000054,0.000050,0.014946,-0.014011,-0.000501,0.000514,
-//   -0.000165,0.000129,0.000024,-0.000144,-0.000000,0.000014,-0.000014,-0.000001,-0.000004,0.000006,
-//   0.000013,0.000034,-0.000034,0.000046,-0.000031,0.000043,-0.000033,-0.000382,0.001880,-0.000033,
-//   -0.000445,0.000099,0.000059,0.000090,0.000094,0.000000,0.000014,0.000001,0.000004,-0.000006,
-//   -0.000013,-0.000034,0.000034,-0.000046,0.000031,-0.000043,0.000033,0.000382,-0.001880,0.000033,
-//   0.000445,-0.000099,-0.000059,-0.000090,-0.000094,-0.000000,0.000003,0.000001,0.000000,-0.000001,
-//   0.000008,-0.000008,0.000011,-0.000023,0.000054,-0.000015,-0.000059,-0.006143,-0.000414,0.000580,
-//   0.000071,-0.000167,-0.000065,-0.000002,-0.000000,-0.000002,0.000001,-0.000006,-0.000008,0.000008,
-//   -0.000037,0.000003,0.000026,-0.000008,0.003592,0.002578,-0.000620,0.000312,0.000169,-0.000031,
-//   -0.000004,0.000051,0.000000,-0.000011,0.000001,0.000009,-0.000009,-0.000046,0.000073,-0.000053,
-//   0.000047,0.003492,-0.004560,-0.000148,0.000058,0.000018,-0.000131,0.000076,-0.000057,-0.000000,
-//   0.000013,-0.000010,0.000010,0.000013,-0.000023,0.000034,-0.000063,0.003319,0.000528,-0.000159,
-//   0.000133,0.000039,-0.000003,0.000063,-0.000125,0.000000,0.000003,-0.000003,-0.000023,0.000008,
-//   0.000026,-0.000016,-0.005729,0.006263,0.000073,-0.000177,0.000040,-0.000028,-0.000021,0.000049,
-//   0.000000,0.000003,0.000023,-0.000008,-0.000026,0.000016,0.005729,-0.006263,-0.000073,0.000177,
-//   -0.000040,0.000028,0.000021,-0.000049,-0.000000,0.000223,0.000008,0.000084,-0.000118,-0.006256,
-//   -0.005027,-0.007373,0.005885,0.001390,-0.000636,0.000529,0.000059,-0.000001,-0.000025,0.000012,
-//   0.000042,0.020880,-0.002722,0.002576,-0.002057,-0.000950,0.000485,-0.000191,0.000193,-0.000001,
-//   -0.000215,-0.000031,0.005562,-0.001103,-0.005286,0.005676,0.000534,-0.001149,0.000033,-0.000423,
-//   0.000001,0.000045,-0.009138,-0.003711,0.002618,-0.001876,-0.000570,0.000776,-0.000212,-0.000292,
-//   0.000001,-3.776706,1.093162,0.517083,-0.236959,0.040573,0.171148,-0.028136,0.018541,0.000551,
-//   3.295492,0.291656,-0.730350,-0.126366,-0.029510,-0.031896,0.070744,-0.000661,0.000781,-0.008250,
-//   -0.003302,-0.011529,0.018921,-0.001593,0.000018,0.014263,0.010778,0.000385,-0.000329,-0.022784,
-//   -0.000015,-0.000889,-0.000057,-0.001046,-0.001702,0.000002,0.001409,-0.000454,-0.001083,-0.000000,
-//   0.001037,0.000569,0.000000,0.000227,0.000004,0.000000
-// ]);
+
 function createRandom(){
   const ind=new Individual();
-  for(let i=0;i<NF;i++)ind.wLin[i]=(Math.random()-0.5)*3;
-  for(let i=0;i<NQ;i++){
-    if(Math.random()<0.1)ind.wQuad[i]=(Math.random()-0.5)*0.2;
-  }
+  for(let i=1;i<=6;i++)ind.pieceW[i]=0.5+Math.random()*1.5;
   return ind;
 }
+
 
 // =========================================================================
 //  SEARCH ENGINE (TT, Iterative Deepening, Null Move, LMR, Killers)
@@ -1090,8 +793,85 @@ function clearKillers(){for(let i=0;i<MAX_PLY;i++)killers[i]=[null,null];}
 let searchNodes=0,searchAborted=false,searchMaxNodes=Infinity;
 
 function evalPos(pos,ind){
-  const feat=computeFeatures(pos);
-  return pos.turn===WHITE?ind.evaluate(feat):-ind.evaluate(feat);
+  return ind.leafEval(pos);
+}
+
+// =========================================================================
+//  SOFT-MINIMAX (PARTITION FUNCTION OVER CONTINUATIONS)
+//  Computes the thermodynamic free energy of a position by summing over
+//  all legal continuations with Boltzmann weights exp(V/T).
+//  Returns: value (free energy), entropy (continuation entropy),
+//  heat (specific heat = variance/T²), probs (Boltzmann move probs).
+// =========================================================================
+let thermoT=3.0;
+let thermoDepth=2;
+const PAWN_XRAY=3.5;
+
+function setThermoT(v){
+  thermoT=parseFloat(v);
+  document.getElementById('T-val').textContent=thermoT.toFixed(1);
+  updateDashboard();
+}
+function setThermoDepth(v){
+  thermoDepth=parseInt(v);
+  updateDashboard();
+}
+
+function softMinimax(pos,depth,T,ind){
+  if(depth<=0){
+    return {value:ind.leafEval(pos),entropy:0,heat:0,probs:null,moves:null,vals:null};
+  }
+  const moves=pos.legalMoves();
+  if(moves.length===0){
+    return pos.inCheck()
+      ?{value:-MATE,entropy:0,heat:0,probs:null,moves:null,vals:null}
+      :{value:0,entropy:0,heat:0,probs:null,moves:null,vals:null};
+  }
+  const vals=new Float64Array(moves.length);
+  for(let i=0;i<moves.length;i++){
+    pos.makeMove(moves[i]);
+    const child=softMinimax(pos,depth-1,T,ind);
+    vals[i]=-child.value;
+    pos.unmakeMove();
+  }
+  const vmax=Math.max(...vals);
+  let sumExp=0;
+  for(let i=0;i<vals.length;i++)sumExp+=Math.exp((vals[i]-vmax)/T);
+  const F=vmax+T*Math.log(sumExp);
+  const probs=new Float64Array(vals.length);
+  for(let i=0;i<vals.length;i++)probs[i]=Math.exp((vals[i]-vmax)/T)/sumExp;
+  let S=0;
+  for(let i=0;i<probs.length;i++)if(probs[i]>1e-15)S-=probs[i]*Math.log(probs[i]);
+  let mu=0;
+  for(let i=0;i<vals.length;i++)mu+=probs[i]*vals[i];
+  let sigma2=0;
+  for(let i=0;i<vals.length;i++)sigma2+=probs[i]*(vals[i]-mu)*(vals[i]-mu);
+  const C=sigma2/(T*T);
+  return {value:F,entropy:S,heat:C,probs,moves,vals};
+}
+
+function computeChemicalPotentials(pos,ind){
+  const potentials={};
+  const types=[PAWN,KNIGHT,BISHOP,ROOK,QUEEN];
+  const names=['P','N','B','R','Q'];
+  for(let t=0;t<types.length;t++){
+    let sumW=0,countW=0,sumB=0,countB=0;
+    for(let sq=0;sq<64;sq++){
+      if(!pos.board[sq])continue;
+      const apc=Math.abs(pos.board[sq]),color=Math.sign(pos.board[sq]);
+      if(apc===types[t]){
+        const fi=xrayMobility(apc,sq,color)*ind.pieceW[apc];
+        if(color===WHITE){sumW+=fi;countW++;}
+        else{sumB+=fi;countB++;}
+      }
+    }
+    potentials[names[t]]={
+      w:countW>0?sumW/countW:0,
+      b:countB>0?sumB/countB:0,
+      nw:countW,nb:countB
+    };
+  }
+  return potentials;
 }
 
 function mvvLva(b,m){
@@ -1309,8 +1089,6 @@ function initPop(K){
 }
 
 function evolvePop(pop,gen,totalGens){
-  const alpha=0.05;
-  pop.forEach(ind=>{ind.fitness-=alpha*ind.l1Quad();});
   pop.sort((a,b)=>b.fitness-a.fitness);
 
   const K=pop.length;
@@ -1324,22 +1102,10 @@ function evolvePop(pop,gen,totalGens){
     const p1=pop[Math.floor(Math.random()*eliteCount)];
     const p2=pop[Math.floor(Math.random()*Math.ceil(K*0.5))];
     const child=new Individual();
-    for(let i=0;i<NF;i++)child.wLin[i]=Math.random()<0.5?p1.wLin[i]:p2.wLin[i];
-    for(let i=0;i<NQ;i++)child.wQuad[i]=Math.random()<0.5?p1.wQuad[i]:p2.wQuad[i];
-
-    // Mutation
-    for(let i=0;i<NF;i++){
-      if(Math.random()<0.25)child.wLin[i]+=gaussRand()*10*mutScale;
-    }
-    for(let i=0;i<NQ;i++){
-      if(Math.abs(child.wQuad[i])>0.001&&Math.random()<0.2)
-        child.wQuad[i]+=gaussRand()*1.5*mutScale;
-      if(Math.abs(child.wQuad[i])<0.01)child.wQuad[i]=0;
-    }
-    // Explore: occasionally activate new quad terms
-    if(Math.random()<0.15){
-      const ri=Math.floor(Math.random()*NQ);
-      if(!child.wQuad[ri])child.wQuad[ri]=gaussRand()*2*mutScale;
+    for(let i=1;i<=6;i++)child.pieceW[i]=Math.random()<0.5?p1.pieceW[i]:p2.pieceW[i];
+    for(let i=1;i<=6;i++){
+      if(Math.random()<0.3)child.pieceW[i]+=gaussRand()*0.2*mutScale;
+      child.pieceW[i]=Math.max(0.01,child.pieceW[i]);
     }
     child.fitness=0;
     newPop.push(child);
@@ -1386,7 +1152,10 @@ async function runEvolution(config){
     evoFitnessHistory.push(evoPop[0].fitness);
     updateEvoUI();
     drawFitnessChart();
-    log('Gen '+(gen+1)+': best fitness='+evoPop[0].fitness.toFixed(1)+' active_quad='+evoPop[0].activeQuad());
+    const bw=evoPop[0].pieceW;
+    log('Gen '+(gen+1)+': fit='+evoPop[0].fitness.toFixed(1)+
+      ' w=[P'+bw[PAWN].toFixed(2)+' N'+bw[KNIGHT].toFixed(2)+' B'+bw[BISHOP].toFixed(2)+
+      ' R'+bw[ROOK].toFixed(2)+' Q'+bw[QUEEN].toFixed(2)+']');
     await yieldFrame();
   }
 
@@ -1417,8 +1186,10 @@ function updateEvoUI(){
   document.getElementById('st-gen').textContent=(evoGen+1)+' / '+gens;
   document.getElementById('st-games').textContent=evoTotalGames;
   document.getElementById('st-fit').textContent=best.fitness.toFixed(1);
-  document.getElementById('st-ds').textContent=best.wLin[F_DS].toFixed(1);
-  document.getElementById('st-aq').textContent=best.activeQuad();
+  const pw=best.pieceW;
+  document.getElementById('st-pw').textContent=
+    'P'+pw[PAWN].toFixed(2)+' N'+pw[KNIGHT].toFixed(2)+' B'+pw[BISHOP].toFixed(2)+
+    ' R'+pw[ROOK].toFixed(2)+' Q'+pw[QUEEN].toFixed(2);
   const pct=gens?((evoGen+1)/gens*100):0;
   document.getElementById('evo-prog').style.width=pct+'%';
 }
@@ -1754,19 +1525,27 @@ function setStatus(s){document.getElementById('game-status').textContent=s;}
 
 function updateDashboard(){
   if(!engineWeights)return;
-  const feat=computeFeatures(gamePos);
-  const e=engineWeights.evaluate(feat);
-  const dF=(feat[F_UW]-feat[F_TW]*feat[F_SW])-(feat[F_UB]-feat[F_TB]*feat[F_SB]);
 
-  document.getElementById('td-Uw').textContent=feat[F_UW].toFixed(0);
-  document.getElementById('td-Ub').textContent=feat[F_UB].toFixed(0);
-  document.getElementById('td-Tw').textContent=feat[F_TW].toFixed(2);
-  document.getElementById('td-Tb').textContent=feat[F_TB].toFixed(2);
-  document.getElementById('td-Sw').textContent=feat[F_SW].toFixed(3);
-  document.getElementById('td-Sb').textContent=feat[F_SB].toFixed(3);
-  document.getElementById('td-dF').textContent=dF.toFixed(1);
-  document.getElementById('td-tau').textContent=feat[F_TAU].toFixed(2);
+  const {Uw,Ub}=engineWeights.rawU(gamePos);
+  document.getElementById('td-Uw').textContent=Uw.toFixed(0);
+  document.getElementById('td-Ub').textContent=Ub.toFixed(0);
+
+  const thermo=softMinimax(gamePos,thermoDepth,thermoT,engineWeights);
+  const Fabs=gamePos.turn===WHITE?thermo.value:-thermo.value;
+  const e=Fabs/PAWN_XRAY;
+
+  document.getElementById('td-F').textContent=Fabs.toFixed(1);
+  document.getElementById('td-S').textContent=thermo.entropy.toFixed(3);
+  document.getElementById('td-C').textContent=thermo.heat.toFixed(3);
+  document.getElementById('td-T').textContent=thermoT.toFixed(1);
   document.getElementById('td-E').textContent=e.toFixed(2);
+
+  const mu=computeChemicalPotentials(gamePos,engineWeights);
+  let muStr='';
+  for(const [k,v] of Object.entries(mu)){
+    if(v.nw+v.nb>0)muStr+=k+':'+(v.w-v.b).toFixed(1)+' ';
+  }
+  document.getElementById('td-mu').textContent=muStr.trim()||'-';
 
   const pct=100/(1+Math.exp(-e));
   document.getElementById('eval-fill').style.width=Math.max(2,Math.min(98,pct))+'%';

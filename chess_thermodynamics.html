@@ -167,10 +167,11 @@ select{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:6px 10p
         <button onclick="newGame()">New Game</button>
         <button onclick="undoMove()">Undo</button>
         <button onclick="flipBoard()">Flip</button>
-        <select id="depth-sel" onchange="searchDepth=+this.value">
-          <option value="1">Easy</option>
-          <option value="2" selected>Medium</option>
-          <option value="3">Hard</option>
+        <select id="depth-sel" onchange="setDifficulty(this.value)">
+          <option value="easy">Easy (~2s)</option>
+          <option value="medium" selected>Medium (~5s)</option>
+          <option value="hard">Hard (~15s)</option>
+          <option value="max">Maximum (~60s)</option>
         </select>
       </div>
     </div>
@@ -184,7 +185,8 @@ select{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:6px 10p
 const EMPTY=0,PAWN=1,KNIGHT=2,BISHOP=3,ROOK=4,QUEEN=5,KING=6;
 const WHITE=1,BLACK=-1;
 const CWK=1,CWQ=2,CBK=4,CBQ=8;
-const CHEB=(s1,s2)=>Math.max(Math.abs((s1&7)-(s2&7)),Math.abs((s1>>3)-(s2>>3)));
+const GREEN=new Float64Array(4096);
+for(let a=0;a<64;a++)for(let b=0;b<64;b++)GREEN[a*64+b]=1/(1+Math.max(Math.abs((a&7)-(b&7)),Math.abs((a>>3)-(b>>3))));
 const MATE=1e6;
 const NF=27;
 const F_SW=0,F_SB=1,F_DS=2,F_D1W=3,F_D1B=4,F_D2W=5,F_D2B=6;
@@ -201,6 +203,12 @@ const PIECE_LETTER={1:'',2:'N',3:'B',4:'R',5:'Q',6:'K'};
 const FILES='abcdefgh';
 const KNIGHT_DR=[-2,-2,-1,-1,1,1,2,2],KNIGHT_DF=[-1,1,-2,2,-2,2,-1,1];
 const SLIDE_DIRS=[[0,1],[0,-1],[1,0],[-1,0],[1,1],[1,-1],[-1,1],[-1,-1]];
+
+// Zobrist hashing
+const ZOB={p:new Int32Array(13*64),s:0,c:new Int32Array(16),e:new Int32Array(9)};
+(function(){let x=1234567890;function r(){x^=x<<13;x^=x>>>17;x^=x<<5;return x;}
+for(let i=0;i<13*64;i++)ZOB.p[i]=r();ZOB.s=r();
+for(let i=0;i<16;i++)ZOB.c[i]=r();for(let i=0;i<9;i++)ZOB.e[i]=r();})();
 
 // =========================================================================
 //  POSITION CLASS
@@ -416,6 +424,14 @@ class Position{
       return ok;
     });
   }
+  hash(){
+    let h=0;
+    for(let sq=0;sq<64;sq++)if(this.board[sq])h^=ZOB.p[(this.board[sq]+6)*64+sq];
+    if(this.turn===BLACK)h^=ZOB.s;
+    h^=ZOB.c[this.castling];
+    h^=ZOB.e[this.ep>=0?(this.ep&7)+1:0];
+    return h;
+  }
 }
 
 // =========================================================================
@@ -496,7 +512,7 @@ function computeFeatures(pos,wPawn,wKing){
     let fw=0,fb=0;
     for(let s=0;s<64;s++){
       if(srcW[s]>0||srcB[s]>0){
-        const g=1/(1+CHEB(x,s));
+        const g=GREEN[x*64+s];
         fw+=srcW[s]*g;fb+=srcB[s]*g;
       }
     }
@@ -573,7 +589,7 @@ function computeFeatures(pos,wPawn,wKing){
   if(wkSq>=0&&bkSq>=0){
     let awk=0,dwk=0,abk=0,dbk=0;
     for(let sq=0;sq<64;sq++){
-      const kw=1/(1+CHEB(sq,wkSq)),kb=1/(1+CHEB(sq,bkSq));
+      const kw=GREEN[sq*64+wkSq],kb=GREEN[sq*64+bkSq];
       awk+=rhoB[sq]*kw;dwk+=rhoW[sq]*kw;
       abk+=rhoW[sq]*kb;dbk+=rhoB[sq]*kb;
     }
@@ -675,21 +691,50 @@ function createRandom(){
 }
 
 // =========================================================================
-//  SEARCH ENGINE
+//  SEARCH ENGINE (TT, Iterative Deepening, Null Move, LMR, Killers)
 // =========================================================================
+const TT_SZ=1<<20,TT_EX=0,TT_AL=1,TT_BE=2;
+let ttab=new Array(TT_SZ).fill(null);
+function ttClear(){ttab.fill(null);}
+function ttGet(h){const e=ttab[(h>>>0)%TT_SZ];return(e&&e.h===h)?e:null;}
+function ttPut(h,d,s,f,bm){const i=(h>>>0)%TT_SZ;const e=ttab[i];if(!e||d>=e.d)ttab[i]={h,d,s,f,bm};}
+
+const MAX_PLY=64;
+const killers=Array.from({length:MAX_PLY},()=>[null,null]);
+function clearKillers(){for(let i=0;i<MAX_PLY;i++)killers[i]=[null,null];}
+
+let searchNodes=0,searchAborted=false,searchMaxNodes=Infinity;
+
 function evalPos(pos,ind){
   const feat=computeFeatures(pos,ind.wPawn,ind.wKing);
-  let e=ind.evaluate(feat);
-  return pos.turn===WHITE?e:-e;
+  return pos.turn===WHITE?ind.evaluate(feat):-ind.evaluate(feat);
 }
 
 function mvvLva(b,m){
   const victim=b[m.to]?Math.abs(b[m.to])*100:0;
-  const attacker=Math.abs(b[m.from]);
-  return victim*10-attacker+(m.promo?500:0);
+  return victim*10-Math.abs(b[m.from])+(m.promo?500:0);
+}
+
+function orderMoves(moves,b,ttMove,ply){
+  for(const m of moves){
+    let sc=0;
+    if(ttMove&&m.from===ttMove.from&&m.to===ttMove.to)sc=10000;
+    else if(b[m.to])sc=5000+mvvLva(b,m);
+    else if(m.promo)sc=4500;
+    else{
+      const k=killers[ply];
+      if(k[0]&&m.from===k[0].from&&m.to===k[0].to)sc=4000;
+      else if(k[1]&&m.from===k[1].from&&m.to===k[1].to)sc=3900;
+    }
+    m.ord=sc;
+  }
+  moves.sort((a,c)=>c.ord-a.ord);
 }
 
 function quiesce(pos,alpha,beta,ind,depth){
+  searchNodes++;
+  if(searchAborted)return 0;
+  if(searchNodes>searchMaxNodes){searchAborted=true;return 0;}
   const inCheck=pos.inCheck();
   if(!inCheck){
     const stand=evalPos(pos,ind);
@@ -704,55 +749,145 @@ function quiesce(pos,alpha,beta,ind,depth){
     pos.makeMove(m);
     const sc=-quiesce(pos,-beta,-alpha,ind,depth-1);
     pos.unmakeMove();
+    if(searchAborted)return 0;
     if(sc>=beta)return beta;
     if(sc>alpha)alpha=sc;
   }
   return alpha;
 }
 
-function alphaBeta(pos,depth,alpha,beta,ind,qd){
-  if(depth<=0)return quiesce(pos,alpha,beta,ind,qd);
-  const moves=pos.legalMoves();
-  if(moves.length===0)return pos.inCheck()?-MATE+pos.fullmove:0;
-  moves.sort((a,b)=>mvvLva(pos.board,b)-mvvLva(pos.board,a));
-  for(const m of moves){
-    pos.makeMove(m);
-    const sc=-alphaBeta(pos,depth-1,-beta,-alpha,ind,qd);
-    pos.unmakeMove();
-    if(sc>=beta)return beta;
-    if(sc>alpha)alpha=sc;
+function searchAB(pos,depth,alpha,beta,ind,ply,nullOk){
+  searchNodes++;
+  if(searchAborted)return 0;
+  if(searchNodes>searchMaxNodes){searchAborted=true;return 0;}
+  if(depth<=0)return quiesce(pos,alpha,beta,ind,8);
+
+  const h=pos.hash();
+  const tte=ttGet(h);
+  let ttMove=null;
+  if(tte){
+    ttMove=tte.bm;
+    if(tte.d>=depth){
+      if(tte.f===TT_EX)return tte.s;
+      if(tte.f===TT_AL&&tte.s<=alpha)return alpha;
+      if(tte.f===TT_BE&&tte.s>=beta)return beta;
+    }
   }
-  return alpha;
+
+  const inCheck=pos.inCheck();
+
+  // Null move pruning
+  if(nullOk&&!inCheck&&depth>=3&&ply>0){
+    const savedTurn=pos.turn,savedEp=pos.ep;
+    pos.turn=-pos.turn;pos.ep=-1;
+    const ns=-searchAB(pos,depth-3,-beta,-beta+1,ind,ply+1,false);
+    pos.turn=savedTurn;pos.ep=savedEp;
+    if(searchAborted)return 0;
+    if(ns>=beta)return beta;
+  }
+
+  const moves=pos.legalMoves();
+  if(!moves.length)return inCheck?-MATE+ply:0;
+  orderMoves(moves,pos.board,ttMove,ply);
+
+  let bestScore=-Infinity,bestMove=null;
+  const origAlpha=alpha;
+
+  for(let i=0;i<moves.length;i++){
+    const m=moves[i];
+    const isCapture=!!pos.board[m.to]||m.ep;
+    pos.makeMove(m);
+
+    let sc;
+    const ext=inCheck?1:0;
+
+    if(i===0){
+      sc=-searchAB(pos,depth-1+ext,-beta,-alpha,ind,ply+1,true);
+    }else{
+      let R=0;
+      if(i>=4&&depth>=3&&!inCheck&&!isCapture&&!m.promo){
+        R=1+Math.floor(Math.log(depth)*Math.log(i)/2.5);
+        if(R>depth-2)R=depth-2;
+      }
+      sc=-searchAB(pos,depth-1-R+ext,-alpha-1,-alpha,ind,ply+1,true);
+      if(sc>alpha&&(R>0||sc<beta)){
+        sc=-searchAB(pos,depth-1+ext,-beta,-alpha,ind,ply+1,true);
+      }
+    }
+
+    pos.unmakeMove();
+    if(searchAborted)return bestScore>-Infinity?bestScore:0;
+
+    if(sc>bestScore){
+      bestScore=sc;bestMove=m;
+      if(sc>alpha){
+        alpha=sc;
+        if(alpha>=beta){
+          if(!isCapture&&ply<MAX_PLY){
+            killers[ply][1]=killers[ply][0];
+            killers[ply][0]={from:m.from,to:m.to};
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  const flag=bestScore<=origAlpha?TT_AL:bestScore>=beta?TT_BE:TT_EX;
+  ttPut(h,depth,bestScore,flag,bestMove);
+  return bestScore;
 }
 
-function bestMove(pos,ind,depth,qd){
-  const moves=pos.legalMoves();
-  if(!moves.length)return null;
-  moves.sort((a,b)=>mvvLva(pos.board,b)-mvvLva(pos.board,a));
-  let best=null,bestSc=-Infinity;
-  for(const m of moves){
-    pos.makeMove(m);
-    const sc=-alphaBeta(pos,depth-1,-Infinity,Infinity,ind,qd||2);
-    pos.unmakeMove();
-    if(sc>bestSc){bestSc=sc;best=m;best.score=sc;}
+function bestMoveID(pos,ind,maxDepth,maxNodes){
+  searchNodes=0;searchAborted=false;searchMaxNodes=maxNodes;
+  clearKillers();
+  let bestMove=null,bestScore=-Infinity;
+
+  for(let d=1;d<=maxDepth;d++){
+    const moves=pos.legalMoves();
+    if(!moves.length)return null;
+    if(bestMove){
+      const idx=moves.findIndex(m=>m.from===bestMove.from&&m.to===bestMove.to
+        &&((!m.promo&&!bestMove.promo)||(m.promo===bestMove.promo)));
+      if(idx>0){const t=moves[0];moves[0]=moves[idx];moves[idx]=t;}
+    }
+    orderMoves(moves,pos.board,bestMove,0);
+
+    let dBest=null,dBestSc=-Infinity;
+    for(const m of moves){
+      pos.makeMove(m);
+      const sc=-searchAB(pos,d-1,-Infinity,-dBestSc,ind,1,true);
+      pos.unmakeMove();
+      if(searchAborted)break;
+      if(sc>dBestSc){dBestSc=sc;dBest=m;dBest.score=sc;}
+    }
+
+    if(!searchAborted&&dBest){
+      bestMove=dBest;bestScore=dBestSc;
+    }
+    if(searchAborted||Math.abs(bestScore)>MATE-100)break;
   }
-  return best;
+
+  return bestMove;
 }
 
 // =========================================================================
 //  EVOLUTION
 // =========================================================================
-function playTrainingGame(w,bl,maxMoves){
+async function playTrainingGame(w,bl,maxMoves){
   const pos=new Position();pos.reset();
+  ttClear();
   let result=0;
   for(let mv=0;mv<maxMoves;mv++){
     const ind=pos.turn===WHITE?w:bl;
-    const m=bestMove(pos,ind,1,2);
+    const m=bestMoveID(pos,ind,8,100000);
     if(!m){
       if(pos.inCheck())result=pos.turn===WHITE?-1:1;
       break;
     }
     pos.makeMove(m);
+    evoCurrentBoard=pos.clone();
+    if(mv%4===0)await yieldFrame();
     const feat=computeFeatures(pos,w.wPawn,w.wKing);
     const eRaw=w.evaluate(feat);
     if(Math.abs(eRaw)>5000){result=eRaw>0?1:-1;break;}
@@ -840,7 +975,7 @@ async function runEvolution(config){
         for(let g=0;g<G;g++){
           const w=g%2===0?evoPop[i]:evoPop[j];
           const bl=g%2===0?evoPop[j]:evoPop[i];
-          const res=playTrainingGame(w,bl,100);
+          const res=await playTrainingGame(w,bl,100);
           w.fitness+=res;bl.fitness-=res;
           evoTotalGames++;
           if(evoTotalGames%4===0){
@@ -946,7 +1081,9 @@ function disableEvoButtons(dis){
 // =========================================================================
 let gamePos=new Position();
 let engineWeights=null;
-let searchDepth=2;
+const DIFFICULTIES={easy:200000,medium:1000000,hard:5000000,max:30000000};
+let thinkNodes=1000000;
+function setDifficulty(lv){thinkNodes=DIFFICULTIES[lv]||1000000;}
 let selectedSq=-1;
 let legalMovesCache=[];
 let moveHistory=[];
@@ -1054,7 +1191,7 @@ function renderPlayBoard(){
       else if(apc===KING)w=engineWeights.wKing;
       const charge=q*w*color;
       for(let t=0;t<64;t++){
-        heatField[t]+=charge/(1+CHEB(t,sq));
+        heatField[t]+=charge*GREEN[t*64+sq];
       }
     }
   }
@@ -1176,8 +1313,8 @@ function executePlayerMove(m){
 }
 
 async function aiMove(){
-  const d=searchDepth;
-  const m=bestMove(gamePos,engineWeights,d,2);
+  ttClear();
+  const m=bestMoveID(gamePos,engineWeights,20,thinkNodes);
   if(!m){checkGameEnd();return;}
   const san=moveToSAN(gamePos,m);
   gamePos.makeMove(m);

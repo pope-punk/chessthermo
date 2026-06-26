@@ -1051,6 +1051,14 @@ function createSeeded(){
   ind.setQ(25,26,0.000008); // TAU*T0
   ind.setQ(26,26,-0.000001); // T0*T0
 
+  // Scale from logistic regression units to centipawn-range units.
+  // The sigmoid maps [-5,+5] to [0%,100%] win probability;
+  // multiplying by 400 gives evaluations in the [-2000,+2000] range
+  // that the alpha-beta search needs for meaningful play.
+  const K=400;
+  for(let i=0;i<NF;i++)ind.wLin[i]*=K;
+  for(let i=0;i<NQ;i++)ind.wQuad[i]*=K;
+
   return ind;
 }
 

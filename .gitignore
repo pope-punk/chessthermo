@@ -3,3 +3,6 @@ package-lock.json
 package.json
 __pycache__/
 *.pgn
+*.aux
+*.log
+*.out

@@ -1,0 +1,334 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{parskip}
+
+\title{Chess Thermodynamics:\\A Gibbs Free Energy Framework for Positional Evaluation}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We develop a chess evaluation framework grounded in statistical mechanics.
+Each chess position is treated as a thermodynamic state characterized by
+internal energy~$U$, temperature~$T$, and entropy~$S$.
+The evaluation decomposes into a \emph{free energy} component
+$F = U - TS$ that captures the kinetic--entropic balance of each side,
+and a \emph{potential energy} component $PV$ fitted from master games
+that encodes structural and tactical interactions.
+The engine evaluation is $\mathcal{E} = (\Delta F - PV)/\bar{T}$,
+expressed in piece-equivalent units.
+At thermodynamic equilibrium---well-played positions by strong players---the
+Gibbs relation $G = U + PV - TS \approx 0$ holds, providing the fitting
+constraint for the potential energy weights.
+\end{abstract}
+
+\section{Motivation}
+
+Traditional chess engines evaluate positions by assigning fixed point
+values to material and adding hand-tuned bonuses for positional features
+(king safety, pawn structure, piece activity, etc.). This approach is
+effective but theoretically ad hoc: there is no principled relationship
+between the material term and the positional corrections.
+
+Statistical mechanics offers a natural language for this problem. A chess
+position is a \emph{configuration} of interacting particles (pieces) on a
+lattice (the board). Each piece has degrees of freedom (squares it can
+reach), and the collective behavior of the position---how well-coordinated
+the pieces are, how efficiently mobility is distributed, how much the
+opposing forces overlap---maps onto thermodynamic quantities.
+
+The key insight is that well-played games sit near \emph{thermodynamic
+equilibrium}: strong players maintain a balance between energy, entropy,
+and structural tension. Deviations from equilibrium correspond to
+advantages that one side can exploit.
+
+\section{Thermodynamic Variables}
+
+\subsection{Internal Energy: $U$}
+
+The internal energy of a side is its \textbf{total x-ray mobility}---the
+number of squares each piece could reach if no other pieces blocked its
+path, summed over all pieces.
+
+\begin{equation}
+U = \sum_{i \in \text{pieces}} f_i
+\end{equation}
+
+where $f_i$ is the x-ray mobility of piece~$i$ (the number of squares it
+attacks or moves to on an empty board from its current square, following
+its movement rules along full rays).
+
+X-ray mobility is a function of piece type and square alone, independent of
+the current board configuration. This makes $U$ a measure of the
+\emph{intrinsic energy potential} of the pieces---what they could
+accomplish if unobstructed. A queen on d4 contributes $\sim$27 squares; a
+pawn on e2 contributes $\sim$4. Material advantage is directly reflected:
+removing a piece always reduces $U$ for that side.
+
+\subsection{Temperature: $T$}
+
+Temperature measures the \textbf{concentration of available movement} among
+the pieces. It is defined as:
+
+\begin{equation}
+T = \frac{M}{N_{\text{eff}}}, \qquad N_{\text{eff}} = e^{H}
+\end{equation}
+
+where $M = \sum_i m_i$ is the total number of \emph{legal} moves
+(accounting for blocking, pins, etc.), $m_i$ is the legal move count of
+piece~$i$, and $H$ is the Shannon entropy of the per-piece legal move
+distribution:
+
+\begin{equation}
+H = -\sum_{i} \frac{m_i}{M} \ln \frac{m_i}{M}
+\end{equation}
+
+$N_{\text{eff}} = e^H$ is the effective number of pieces contributing to
+the legal move pool. Temperature captures the \emph{game phase}:
+
+\begin{itemize}[nosep]
+\item \textbf{Cold positions} (middlegame): Legal moves are spread across
+  many pieces. $N_{\text{eff}}$ is large, so $T = M/N_{\text{eff}}$ is
+  small. The position has high ``heat capacity''---many degrees of freedom
+  absorb the available energy.
+\item \textbf{Hot positions} (endgame): Legal moves are concentrated in a
+  few active pieces. $N_{\text{eff}}$ is small, so $T$ is large. Each
+  remaining piece carries a disproportionate share of the available
+  mobility.
+\end{itemize}
+
+This matches chess intuition: in endgames, each piece matters more
+(higher temperature), and material advantages are amplified.
+
+\subsection{Entropy: $S$}
+
+Entropy measures \textbf{x-ray redundancy}---the degree to which the x-ray
+coverage of friendly pieces overlaps.
+
+\begin{equation}
+S = 1 - \frac{|\text{union of x-ray squares}|}{\sum_i f_i}
+\end{equation}
+
+If every piece's x-ray squares were disjoint, the union would equal the
+sum and $S = 0$ (no redundancy, no entropy). If many pieces cover the same
+squares, the union is much smaller than the sum and $S$ approaches~1 (high
+redundancy, high entropy).
+
+Only friendly pieces contribute to each side's entropy. Opponent overlap is
+a distinct physical effect captured by the potential energy.
+
+The analogy to statistical mechanics is precise: $S$ plays the role of
+\emph{configurational entropy} arising from excluded-volume interactions.
+Just as gas molecules in a container have reduced phase space when their
+excluded volumes overlap, chess pieces with overlapping x-ray coverage have
+reduced ``effective'' degrees of freedom. This is a geometric interaction
+(phase-space overlap), not an energetic one---which is why it appears in
+$S$ rather than in the potential energy $PV$.
+
+\subsection{Free Energy: $F = U - TS$}
+
+The Helmholtz free energy per side is:
+
+\begin{equation}
+F = U - TS
+\end{equation}
+
+This represents the \emph{usable} portion of the internal energy after
+subtracting the mobility that is ``lost to disorder''---dispersed across
+redundant coverage. The free energy difference between white and black is:
+
+\begin{equation}
+\Delta F = F_w - F_b = (U_w - T_w S_w) - (U_b - T_b S_b)
+\end{equation}
+
+$\Delta F > 0$ means white has more usable energy; $\Delta F < 0$ favors
+black.
+
+\section{Potential Energy: $PV$}
+
+The free energy $\Delta F$ captures the kinetic--entropic balance but does
+not account for \emph{structural interactions} between pieces: how well
+they coordinate attacks, control key squares, pressure the opposing king,
+or support pawn advances. These are the energetic (as opposed to entropic)
+piece-piece interactions, analogous to intermolecular forces in a real gas.
+
+We model the potential energy as a function of 23 structural features
+$\phi_k$ computed from the position, with both linear and quadratic
+(interaction) terms:
+
+\begin{equation}
+PV = \sum_{k=1}^{23} w_k \, \phi_k + \sum_{k \le l} w_{kl} \, \phi_k \, \phi_l
+\end{equation}
+
+The structural features fall into five categories:
+
+\subsubsection*{Field Multipoles (10 features)}
+
+Each piece acts as a source with charge equal to its x-ray mobility~$f_i$.
+These sources are propagated through a Green's function
+$G(x, s) = 1/(1 + d_{\text{Chebyshev}}(x,s))$ to produce smooth field
+densities $\rho_w(x)$ and $\rho_b(x)$ over the board.
+
+The center of the combined field is computed, along with the inertia tensor
+and its eigenvectors (anchored so the principal axis points toward rank~8).
+In this eigenbasis, we extract per-side \textbf{dipole moments} ($d_1$,
+$d_2$) and \textbf{quadrupole moments} ($q_{11}$, $q_{22}$, $q_{12}$),
+yielding 10 features total.
+
+These capture the large-scale spatial distribution of each side's
+force---whether pieces project forward, concentrate on one flank, or
+spread symmetrically.
+
+\subsubsection*{King--Field Coupling (4 features)}
+
+The propagated enemy field evaluated at each king's position measures
+\textbf{attack pressure}: how strongly the opponent's pieces project force
+toward the king. The friendly field at the king measures
+\textbf{defensive shielding}. This yields four features: attack on white
+king, defense of white king, attack on black king, defense of black king.
+
+\subsubsection*{Meta-Entropy (2 features)}
+
+The Shannon entropy of the per-piece x-ray source distribution:
+
+\begin{equation}
+\eta = -\sum_i \frac{f_i}{\sum_j f_j} \ln \frac{f_i}{\sum_j f_j}
+\end{equation}
+
+This measures how evenly the x-ray ``energy'' is distributed across
+pieces. A side with one dominant piece (e.g., a lone queen) has low
+meta-entropy; a side with many roughly equal pieces has high meta-entropy.
+One feature per side.
+
+\subsubsection*{Pawn Structure (6 features)}
+
+Per-side counts of pawns, total pawn advancement (sum of ranks advanced
+from starting position), and pawn file spread (variance of file positions).
+These capture pawn chain structure, passed pawn potential, and spatial
+coverage.
+
+\subsubsection*{Spatial Tension (1 feature)}
+
+The overlap integral of the opposing propagated fields:
+
+\begin{equation}
+\tau = \sum_{x} \rho_w(x) \cdot \rho_b(x)
+\end{equation}
+
+High tension indicates that the two sides' spheres of influence strongly
+overlap---a hallmark of tactical positions with imminent contact.
+
+\section{The Equation of State}
+
+The total Gibbs free energy of the position is:
+
+\begin{equation}
+G = \Delta F - PV
+\end{equation}
+
+The engine evaluation, normalized to piece-equivalent units, is:
+
+\begin{equation}
+\boxed{\mathcal{E} = \frac{\Delta F - PV}{\bar{T}}}
+\end{equation}
+
+where $\bar{T} = (T_w + T_b)/2$ is the average temperature. The division
+by $\bar{T}$ converts from energy units (squares) to piece-equivalent
+units, ensuring that evaluations are comparable across game phases: a
+two-piece advantage means the same thing whether the position is a
+middlegame or an endgame.
+
+The evaluation bar uses a logistic sigmoid $P = 1/(1 + e^{-\mathcal{E}})$,
+mapping directly from piece advantage to an estimated win probability
+without arbitrary scaling constants.
+
+\section{Fitting the Potential Energy}
+
+At thermodynamic equilibrium---positions from well-played games between
+strong players---the Gibbs free energy vanishes:
+
+\begin{equation}
+G \approx 0 \quad \Longrightarrow \quad PV \approx \Delta F
+\end{equation}
+
+This provides the fitting constraint. From a database of master-level
+games, we extract positions (skipping the opening), compute $\Delta F$ and
+the 23 structural features for each, and fit the potential energy weights
+via ridge regression:
+
+\begin{equation}
+\min_{\mathbf{w}} \sum_{\text{positions}} \left( \Delta F - PV(\mathbf{w}) \right)^2 + \alpha \|\mathbf{w}\|^2
+\end{equation}
+
+The linear and quadratic weights ($23 + 276 = 299$ parameters total) are
+fitted jointly. Feature standardization (zero mean, unit variance) is
+applied before regression to handle the wide dynamic range of the
+structural features (spatial tension $\sim 10^4$ vs.\ pawn counts
+$\sim 10^0$).
+
+After fitting, $PV$ approximates $\Delta F$ at equilibrium. Away from
+equilibrium---when one side has a concrete advantage---$\Delta F \neq PV$,
+and the residual $\mathcal{E} = (\Delta F - PV)/\bar{T}$ measures the
+advantage in piece units.
+
+\section{Physical Interpretation}
+
+The decomposition $G = U + PV - TS$ separates the evaluation into three
+physically distinct channels:
+
+\begin{enumerate}[nosep]
+\item \textbf{Internal energy $U$} (x-ray mobility): The raw potential of
+  each piece, determined by type and position on the board. Directly tracks
+  material advantage. This is the dominant term.
+
+\item \textbf{Entropic correction $TS$}: Subtracts the portion of the
+  internal energy that is ``redundant''---overlapping x-ray coverage among
+  friendly pieces, weighted by how concentrated the legal moves are.
+  Penalizes piece clusters that cover the same squares. Small in magnitude
+  relative to $U$ but captures important configurational effects.
+
+\item \textbf{Potential energy $PV$}: Structural and tactical interactions
+  learned from data. Captures coordination, king safety, pawn structure,
+  spatial tension, and other features that $U - TS$ alone cannot express.
+  This is where the engine learns the ``energetics'' of piece
+  interactions, as distinct from the ``geometry'' captured by entropy.
+\end{enumerate}
+
+The distinction between $S$ and $PV$ mirrors a fundamental distinction in
+statistical mechanics: \emph{entropic} interactions arise from phase-space
+geometry (excluded volume, overlap of accessible states) and are captured
+by $S$, while \emph{energetic} interactions arise from forces between
+particles and are captured by $PV$. Both involve piece-piece relationships,
+but through different thermodynamic channels.
+
+\section{Summary}
+
+\begin{center}
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Quantity} & \textbf{Definition} & \textbf{Chess meaning} \\
+\midrule
+$U$ & $\sum_i f_i$ (x-ray mobility) & Intrinsic piece potential \\
+$T$ & $M / e^H$ (move concentration) & Game phase (cold $=$ middlegame) \\
+$S$ & $1 - |\text{union}|/\sum f_i$ & X-ray redundancy among allies \\
+$F$ & $U - TS$ & Usable energy \\
+$PV$ & Fitted structural weights & Piece coordination and tactics \\
+$\mathcal{E}$ & $(\Delta F - PV)/\bar{T}$ & Evaluation in piece units \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The framework provides a principled decomposition of chess evaluation into
+interpretable thermodynamic components, with a clear fitting procedure
+grounded in the equilibrium assumption. The potential energy weights are
+the only learned parameters; all other quantities ($U$, $T$, $S$, $F$)
+are computed analytically from the position.
+
+\end{document}

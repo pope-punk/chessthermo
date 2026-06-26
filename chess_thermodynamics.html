@@ -727,7 +727,8 @@ class Individual{
     for(let i=0;i<NF;i++)PV+=this.wLin[i]*feat[i+INT_OFF];
     let k=0;
     for(let i=0;i<NF;i++)for(let j=i;j<NF;j++){PV+=this.wQuad[k]*feat[i+INT_OFF]*feat[j+INT_OFF];k++;}
-    return dF-PV;
+    const Tavg=(feat[F_TW]+feat[F_TB])/2||1;
+    return (dF-PV)/Tavg;
   }
   l1Quad(){let s=0;for(let i=0;i<NQ;i++)s+=Math.abs(this.wQuad[i]);return s;}
   activeQuad(){let c=0;for(let i=0;i<NQ;i++)if(Math.abs(this.wQuad[i])>0.001)c++;return c;}
@@ -1448,14 +1449,11 @@ function updateDashboard(){
   document.getElementById('td-Sb').textContent=feat[F_SB].toFixed(3);
   document.getElementById('td-dF').textContent=dF.toFixed(1);
   document.getElementById('td-tau').textContent=feat[F_TAU].toFixed(2);
-  const Tavg=(feat[F_TW]+feat[F_TB])/2||1;
-  const ePieces=e/Tavg;
-  document.getElementById('td-E').textContent=ePieces.toFixed(2);
+  document.getElementById('td-E').textContent=e.toFixed(2);
 
-  const evalBar=Math.max(-10,Math.min(10,ePieces));
-  const pct=50+evalBar*5;
+  const pct=100/(1+Math.exp(-e));
   document.getElementById('eval-fill').style.width=Math.max(2,Math.min(98,pct))+'%';
-  document.getElementById('eval-text').textContent=(ePieces>=0?'+':'')+ePieces.toFixed(2);
+  document.getElementById('eval-text').textContent=(e>=0?'+':'')+e.toFixed(2);
 }
 
 // =========================================================================

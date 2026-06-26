@@ -874,10 +874,18 @@ function bestMoveID(pos,ind,maxDepth,maxNodes){
 // =========================================================================
 //  EVOLUTION
 // =========================================================================
+function materialCount(board,color){
+  const vals=[0,1,3,3,5,9,0];
+  let s=0;
+  for(let sq=0;sq<64;sq++)if(board[sq]&&Math.sign(board[sq])===color)s+=vals[Math.abs(board[sq])];
+  return s;
+}
+
 async function playTrainingGame(w,bl,maxMoves){
   const pos=new Position();pos.reset();
   ttClear();
   let result=0;
+  const posHashes=new Map();
   for(let mv=0;mv<maxMoves;mv++){
     const ind=pos.turn===WHITE?w:bl;
     const m=bestMoveID(pos,ind,8,20000);
@@ -888,9 +896,17 @@ async function playTrainingGame(w,bl,maxMoves){
     pos.makeMove(m);
     evoCurrentBoard=pos.clone();
     if(mv%4===0)await yieldFrame();
-    const feat=computeFeatures(pos,w.wPawn,w.wKing);
-    const eRaw=w.evaluate(feat);
-    if(Math.abs(eRaw)>5000){result=eRaw>0?1:-1;break;}
+
+    // Repetition detection
+    const h=pos.hash();
+    posHashes.set(h,(posHashes.get(h)||0)+1);
+    if(posHashes.get(h)>=3)break;
+
+    // Material-based adjudication (objective, no eval involved)
+    const matW=materialCount(pos.board,WHITE),matB=materialCount(pos.board,BLACK);
+    const diff=matW-matB;
+    if(Math.abs(diff)>=13){result=diff>0?1:-1;break;}
+
     if(pos.halfmove>=100)break;
   }
   return result;
@@ -975,7 +991,7 @@ async function runEvolution(config){
         for(let g=0;g<G;g++){
           const w=g%2===0?evoPop[i]:evoPop[j];
           const bl=g%2===0?evoPop[j]:evoPop[i];
-          const res=await playTrainingGame(w,bl,100);
+          const res=await playTrainingGame(w,bl,300);
           w.fitness+=res;bl.fitness-=res;
           evoTotalGames++;
           if(evoTotalGames%4===0){

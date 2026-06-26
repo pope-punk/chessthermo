@@ -569,20 +569,34 @@ self.onmessage=function(e){
 
   if(X.length<100){self.postMessage({type:'error',msg:'Too few positions ('+X.length+')'});return;}
 
-  // Phase 2: OLS ridge regression (normal equation)
+  // Phase 2: OLS ridge regression with feature scaling
   const n=X.length,d=NTOTAL;
   self.postMessage({type:'progress',phase:'fit',pct:0.1,loss:0,epoch:0});
 
-  // Compute X^T X + alpha*I and X^T y
+  // Compute per-column mean and std for StandardScaler
+  const colMean=new Float64Array(d),colStd=new Float64Array(d);
+  for(let j=0;j<d;j++){
+    let s=0;for(let i=0;i<n;i++)s+=X[i][j];
+    colMean[j]=s/n;
+  }
+  for(let j=0;j<d;j++){
+    let s=0;for(let i=0;i<n;i++){const v=X[i][j]-colMean[j];s+=v*v;}
+    colStd[j]=Math.sqrt(s/n);
+    if(colStd[j]<1e-12)colStd[j]=1.0;
+  }
+
+  // Build X^T X + alpha*I and X^T y on scaled features
   const alpha=1.0;
   const XtX=new Float64Array(d*d);
   const Xty=new Float64Array(d);
   for(let i=0;i<n;i++){
     const xi=X[i],yi=Y[i];
     for(let a=0;a<d;a++){
-      Xty[a]+=xi[a]*yi;
+      const va=(xi[a]-colMean[a])/colStd[a];
+      Xty[a]+=va*yi;
       for(let b=a;b<d;b++){
-        const v=xi[a]*xi[b];
+        const vb=(xi[b]-colMean[b])/colStd[b];
+        const v=va*vb;
         XtX[a*d+b]+=v;
         if(a!==b)XtX[b*d+a]+=v;
       }
@@ -608,11 +622,15 @@ self.onmessage=function(e){
   // Forward solve L*z = Xty
   const z=new Float64Array(d);
   for(let i=0;i<d;i++){let s=Xty[i];for(let j=0;j<i;j++)s-=L[i*d+j]*z[j];z[i]=s/L[i*d+i];}
-  // Back solve L^T*w = z
-  const w=new Float64Array(d);
-  for(let i=d-1;i>=0;i--){let s=z[i];for(let j=i+1;j<d;j++)s-=L[j*d+i]*w[j];w[i]=s/L[i*d+i];}
+  // Back solve L^T*wScaled = z
+  const wScaled=new Float64Array(d);
+  for(let i=d-1;i>=0;i--){let s=z[i];for(let j=i+1;j<d;j++)s-=L[j*d+i]*wScaled[j];wScaled[i]=s/L[i*d+i];}
 
-  // Compute R² and RMSE
+  // Unscale coefficients back to original feature space
+  const w=new Float64Array(d);
+  for(let j=0;j<d;j++)w[j]=wScaled[j]/colStd[j];
+
+  // Compute R² and RMSE on original features
   let ssRes=0,ssTot=0,yMean=0;
   for(let i=0;i<n;i++)yMean+=Y[i];yMean/=n;
   for(let i=0;i<n;i++){

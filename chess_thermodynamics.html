@@ -153,7 +153,7 @@ select{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:6px 10p
           <div class="thermo-item"><label>S<sup>b</sup></label><span id="td-Sb">-</span></div>
           <div class="thermo-item"><label>&Delta;F</label><span id="td-dF">-</span></div>
           <div class="thermo-item"><label>Tension &tau;</label><span id="td-tau">-</span></div>
-          <div class="thermo-item"><label>Eval (cp)</label><span id="td-E">-</span></div>
+          <div class="thermo-item"><label>Eval (pieces)</label><span id="td-E">-</span></div>
         </div>
       </div>
       <div class="move-list-wrap">
@@ -1448,12 +1448,14 @@ function updateDashboard(){
   document.getElementById('td-Sb').textContent=feat[F_SB].toFixed(3);
   document.getElementById('td-dF').textContent=dF.toFixed(1);
   document.getElementById('td-tau').textContent=feat[F_TAU].toFixed(2);
-  document.getElementById('td-E').textContent=e.toFixed(0);
+  const Tavg=(feat[F_TW]+feat[F_TB])/2||1;
+  const ePieces=e/Tavg;
+  document.getElementById('td-E').textContent=ePieces.toFixed(2);
 
-  const evalCp=Math.max(-1000,Math.min(1000,e));
-  const pct=50+evalCp/20;
+  const evalBar=Math.max(-10,Math.min(10,ePieces));
+  const pct=50+evalBar*5;
   document.getElementById('eval-fill').style.width=Math.max(2,Math.min(98,pct))+'%';
-  document.getElementById('eval-text').textContent=(e>=0?'+':'')+e.toFixed(0);
+  document.getElementById('eval-text').textContent=(ePieces>=0?'+':'')+ePieces.toFixed(2);
 }
 
 // =========================================================================

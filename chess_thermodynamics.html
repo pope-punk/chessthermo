@@ -188,13 +188,14 @@ const CWK=1,CWQ=2,CBK=4,CBQ=8;
 const GREEN=new Float64Array(4096);
 for(let a=0;a<64;a++)for(let b=0;b<64;b++)GREEN[a*64+b]=1/(1+Math.max(Math.abs((a&7)-(b&7)),Math.abs((a>>3)-(b>>3))));
 const MATE=1e6;
-const NF=27;
+const NF=29;
 const F_SW=0,F_SB=1,F_DS=2,F_D1W=3,F_D1B=4,F_D2W=5,F_D2B=6;
 const F_Q11W=7,F_Q11B=8,F_Q22W=9,F_Q22B=10,F_Q12W=11,F_Q12B=12;
 const F_AWK=13,F_DWK=14,F_ABK=15,F_DBK=16;
 const F_ETAW=17,F_ETAB=18;
 const F_PW=19,F_PB=20,F_PADVW=21,F_PADVB=22,F_PSPRW=23,F_PSPRB=24;
 const F_TAU=25,F_T0=26;
+const F_MATW=27,F_MATB=28;
 const NQ=NF*(NF+1)/2;
 
 const PIECE_CHAR={1:'♙',2:'♘',3:'♗',4:'♖',5:'♕',6:'♔',
@@ -489,6 +490,8 @@ function computeFeatures(pos,wPawn,wKing){
   let nPawns=0,nThermal=0;
   let pawnCountW=0,pawnCountB=0,pawnAdvW=0,pawnAdvB=0;
   const pawnFilesW=[],pawnFilesB=[];
+  const PIECE_VAL=[0,1,3,3.25,5,9,0];
+  let matW=0,matB=0;
 
   // Pass 1: compute source charges q = log(1+m) at piece positions
   for(let sq=0;sq<64;sq++){
@@ -503,7 +506,8 @@ function computeFeatures(pos,wPawn,wKing){
       else{pawnCountB++;pawnAdvB+=6-(sq>>3);pawnFilesB.push(sq&7);}
     }else if(apc===KING){weight=wKing;}
     else{nThermal++;}
-    if(color===WHITE)srcW[sq]=q*weight;else srcB[sq]=q*weight;
+    if(color===WHITE){srcW[sq]=q*weight;matW+=PIECE_VAL[apc];}
+    else{srcB[sq]=q*weight;matB+=PIECE_VAL[apc];}
   }
 
   // Pass 2: propagate sources into fields via lattice Green's function G=1/(1+d)
@@ -628,6 +632,10 @@ function computeFeatures(pos,wPawn,wKing){
   let tau=0;
   for(let x=0;x<64;x++)tau+=rhoW[x]*rhoB[x];
   feat[F_TAU]=tau;
+
+  // Officer material (pawn units: N=3, B=3.25, R=5, Q=9)
+  feat[F_MATW]=matW;
+  feat[F_MATB]=matB;
 
   return feat;
 }
@@ -1050,6 +1058,10 @@ function createSeeded(){
   ind.setQ(24,26,-0.000350); // PSPRB*T0
   ind.setQ(25,26,0.000008); // TAU*T0
   ind.setQ(26,26,-0.000001); // T0*T0
+
+  // Material weights (~100cp per pawn-unit in post-K scale)
+  ind.wLin[27]=0.25; // MATW
+  ind.wLin[28]=-0.25; // MATB
 
   // Scale from logistic regression units to centipawn-range units.
   // The sigmoid maps [-5,+5] to [0%,100%] win probability;

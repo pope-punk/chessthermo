@@ -32,7 +32,7 @@ from sklearn.linear_model import LogisticRegression
 # -------------------------------------------------------------------------
 #  Constants matching the JS engine
 # -------------------------------------------------------------------------
-NF = 27
+NF = 29
 NQ = NF * (NF + 1) // 2
 
 # Feature indices
@@ -43,6 +43,7 @@ F_AWK, F_DWK, F_ABK, F_DBK = 13, 14, 15, 16
 F_ETAW, F_ETAB = 17, 18
 F_PW, F_PB, F_PADVW, F_PADVB, F_PSPRW, F_PSPRB = 19, 20, 21, 22, 23, 24
 F_TAU, F_T0 = 25, 26
+F_MATW, F_MATB = 27, 28
 
 # Precompute Green's function: G(x,s) = 1/(1 + d_chebyshev(x,s))
 GREEN = np.zeros((64, 64), dtype=np.float64)
@@ -319,6 +320,21 @@ def compute_features(board: chess.Board, w_pawn=0.5, w_king=0.3) -> np.ndarray:
     # Spatial tension
     feat[F_TAU] = (rhoW * rhoB).sum()
 
+    # Officer material (pawn units: N=3, B=3.25, R=5, Q=9)
+    piece_vals = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3.25,
+                  chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 0}
+    mat_w = mat_b = 0
+    for sq in range(64):
+        piece = board.piece_at(sq)
+        if piece is not None:
+            v = piece_vals.get(piece.piece_type, 0)
+            if piece.color == chess.WHITE:
+                mat_w += v
+            else:
+                mat_b += v
+    feat[F_MATW] = mat_w
+    feat[F_MATB] = mat_b
+
     return feat
 
 
@@ -326,7 +342,7 @@ def compute_features(board: chess.Board, w_pawn=0.5, w_king=0.3) -> np.ndarray:
 #  Build quadratic feature vector from raw features
 # -------------------------------------------------------------------------
 def expand_quadratic(feat: np.ndarray) -> np.ndarray:
-    """Expand 27 features into 27 + 378 = 405 features (linear + upper-triangle quadratic)."""
+    """Expand NF features into NF + NQ features (linear + upper-triangle quadratic)."""
     quad = []
     for i in range(NF):
         for j in range(i, NF):
@@ -343,7 +359,7 @@ FEATURE_NAMES = [
     "AWK", "DWK", "ABK", "DBK",
     "ETAW", "ETAB",
     "PW", "PB", "PADVW", "PADVB", "PSPRW", "PSPRB",
-    "TAU", "T0"
+    "TAU", "T0", "MATW", "MATB"
 ]
 
 

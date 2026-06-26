@@ -880,7 +880,7 @@ async function playTrainingGame(w,bl,maxMoves){
   let result=0;
   for(let mv=0;mv<maxMoves;mv++){
     const ind=pos.turn===WHITE?w:bl;
-    const m=bestMoveID(pos,ind,8,100000);
+    const m=bestMoveID(pos,ind,8,20000);
     if(!m){
       if(pos.inCheck())result=pos.turn===WHITE?-1:1;
       break;

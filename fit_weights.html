@@ -95,11 +95,11 @@ const GREEN=new Float64Array(4096);
 for(let a=0;a<64;a++)for(let b=0;b<64;b++)
   GREEN[a*64+b]=1/(1+Math.max(Math.abs((a&7)-(b&7)),Math.abs((a>>3)-(b>>3))));
 
-const NF=29,NQ=NF*(NF+1)/2,NTOTAL=NF+NQ;
+const NF=27,NQ=NF*(NF+1)/2,NTOTAL=NF+NQ;
 const FEAT_NAMES=["SW","SB","DS","D1W","D1B","D2W","D2B",
   "Q11W","Q11B","Q22W","Q22B","Q12W","Q12B",
   "AWK","DWK","ABK","DBK","ETAW","ETAB",
-  "PW","PB","PADVW","PADVB","PSPRW","PSPRB","TAU","T0","MATW","MATB"];
+  "PW","PB","PADVW","PADVB","PSPRW","PSPRB","TAU","T0"];
 
 const KNIGHT_DR=[-2,-2,-1,-1,1,1,2,2],KNIGHT_DF=[-1,1,-2,2,-2,2,-1,1];
 const SLIDE_DIRS=[[0,1],[0,-1],[1,0],[-1,0],[1,1],[1,-1],[-1,1],[-1,-1]];
@@ -317,28 +317,49 @@ function pieceMobility(board,sq,ep){
   return cnt;
 }
 
+function xrayMobility(pc,sq,color){
+  const r=sq>>3,f=sq&7;
+  if(pc===PAWN){
+    const dir=color;let c=0;
+    if(r+dir>=0&&r+dir<=7){c++;if(f>0)c++;if(f<7)c++;}
+    if(r===(color===WHITE?1:6))c++;
+    return c;
+  }
+  if(pc===KNIGHT){
+    let c=0;
+    for(let i=0;i<8;i++){const nr=r+KNIGHT_DR[i],nf=f+KNIGHT_DF[i];if(nr>=0&&nr<8&&nf>=0&&nf<8)c++;}
+    return c;
+  }
+  if(pc===KING){
+    let c=0;
+    for(let dr=-1;dr<=1;dr++)for(let df=-1;df<=1;df++){if(!dr&&!df)continue;const nr=r+dr,nf=f+df;if(nr>=0&&nr<8&&nf>=0&&nf<8)c++;}
+    return c;
+  }
+  const dirs=pc===BISHOP?[4,5,6,7]:pc===ROOK?[0,1,2,3]:[0,1,2,3,4,5,6,7];
+  let c=0;
+  for(const d of dirs){let cr=r+SLIDE_DIRS[d][0],cf=f+SLIDE_DIRS[d][1];while(cr>=0&&cr<8&&cf>=0&&cf<8){c++;cr+=SLIDE_DIRS[d][0];cf+=SLIDE_DIRS[d][1];}}
+  return c;
+}
+
 function computeFeatures(pos){
   const b=pos.board,feat=new Float64Array(NF);
   const srcW=new Float64Array(64),srcB=new Float64Array(64);
   let wkSq=-1,bkSq=-1,nPawns=0,nThermal=0;
   let pcW=0,pcB=0,paW=0,paB=0;
   const pfW=[],pfB=[];
-  const PV=[0,1,3,3.25,5,9,0];
-  let matW=0,matB=0;
 
   for(let sq=0;sq<64;sq++){
     if(!b[sq])continue;
     const apc=Math.abs(b[sq]),color=Math.sign(b[sq]);
     if(apc===KING){if(color===WHITE)wkSq=sq;else bkSq=sq;}
     const mob=pieceMobility(b,sq,pos.ep);
-    const q=Math.log(1+mob);
-    let w=1.0;
-    if(apc===PAWN){w=0.5;nPawns++;
+    const fi=xrayMobility(apc,sq,color);
+    const si=fi*Math.log(2+mob);
+    if(apc===PAWN){nPawns++;
       if(color===WHITE){pcW++;paW+=(sq>>3)-1;pfW.push(sq&7);}
       else{pcB++;paB+=6-(sq>>3);pfB.push(sq&7);}
-    }else if(apc===KING){w=0.3;}
-    else{nThermal++;}
-    if(color===WHITE){srcW[sq]=q*w;matW+=PV[apc];}else{srcB[sq]=q*w;matB+=PV[apc];}
+    }else if(apc!==KING){nThermal++;}
+    if(color===WHITE)srcW[sq]=si;else srcB[sq]=si;
   }
 
   const rhoW=new Float64Array(64),rhoB=new Float64Array(64);
@@ -414,7 +435,6 @@ function computeFeatures(pos){
 
   let tau=0;for(let x=0;x<64;x++)tau+=rhoW[x]*rhoB[x];
   feat[25]=tau;
-  feat[27]=matW;feat[28]=matB;
   return feat;
 }
 
@@ -576,11 +596,11 @@ self.onmessage=function(e){
      MAIN THREAD (UI only)
      ================================================================ -->
 <script>
-const NF=29,NQ=NF*(NF+1)/2;
+const NF=27,NQ=NF*(NF+1)/2;
 const FEAT_NAMES=["SW","SB","DS","D1W","D1B","D2W","D2B",
   "Q11W","Q11B","Q22W","Q22B","Q12W","Q12B",
   "AWK","DWK","ABK","DBK","ETAW","ETAB",
-  "PW","PB","PADVW","PADVB","PSPRW","PSPRB","TAU","T0","MATW","MATB"];
+  "PW","PB","PADVW","PADVB","PSPRW","PSPRB","TAU","T0"];
 
 const dropZone=document.getElementById('drop-zone');
 const fileInput=document.getElementById('file-input');
@@ -696,8 +716,8 @@ function showResults(weights){
 
 function generateJS(weights){
   const lin=weights.slice(0,NF);
-  let out='function createSeeded(){\n  const ind=new Individual();\n  ind.wPawn=0.5;ind.wKing=0.3;\n\n';
-  out+='  // Linear weights (fitted from PGN database)\n';
+  let out='function createSeeded(){\n  const ind=new Individual();\n\n';
+  out+='  // Linear weights (DOF-entropy, fitted from PGN database)\n';
   for(let i=0;i<NF;i++){
     if(Math.abs(lin[i])>1e-8)
       out+=`  ind.wLin[${i}]=${lin[i].toFixed(6)}; // ${FEAT_NAMES[i]}\n`;

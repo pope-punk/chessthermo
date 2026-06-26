@@ -107,8 +107,6 @@ select{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:6px 10p
       <div class="stat-row"><span>Games Played</span><span class="stat-val" id="st-games">0</span></div>
       <div class="stat-row"><span>Best Fitness</span><span class="stat-val" id="st-fit">-</span></div>
       <div class="stat-row"><span>Top Weight: &Delta;S</span><span class="stat-val" id="st-ds">-</span></div>
-      <div class="stat-row"><span>w<sub>pawn</sub></span><span class="stat-val" id="st-wp">-</span></div>
-      <div class="stat-row"><span>w<sub>king</sub></span><span class="stat-val" id="st-wk">-</span></div>
       <div class="stat-row"><span>Active Quad Terms</span><span class="stat-val" id="st-aq">-</span></div>
       <div class="progress-bar"><div class="progress-fill" id="evo-prog"></div></div>
     </div>
@@ -188,14 +186,13 @@ const CWK=1,CWQ=2,CBK=4,CBQ=8;
 const GREEN=new Float64Array(4096);
 for(let a=0;a<64;a++)for(let b=0;b<64;b++)GREEN[a*64+b]=1/(1+Math.max(Math.abs((a&7)-(b&7)),Math.abs((a>>3)-(b>>3))));
 const MATE=1e6;
-const NF=29;
+const NF=27;
 const F_SW=0,F_SB=1,F_DS=2,F_D1W=3,F_D1B=4,F_D2W=5,F_D2B=6;
 const F_Q11W=7,F_Q11B=8,F_Q22W=9,F_Q22B=10,F_Q12W=11,F_Q12B=12;
 const F_AWK=13,F_DWK=14,F_ABK=15,F_DBK=16;
 const F_ETAW=17,F_ETAB=18;
 const F_PW=19,F_PB=20,F_PADVW=21,F_PADVB=22,F_PSPRW=23,F_PSPRB=24;
 const F_TAU=25,F_T0=26;
-const F_MATW=27,F_MATB=28;
 const NQ=NF*(NF+1)/2;
 
 const PIECE_CHAR={1:'♙',2:'♘',3:'♗',4:'♖',5:'♕',6:'♔',
@@ -483,31 +480,52 @@ function pieceMobility(board,sq,ep){
   return cnt;
 }
 
-function computeFeatures(pos,wPawn,wKing){
+function xrayMobility(pc,sq,color){
+  const r=sq>>3,f=sq&7;
+  if(pc===PAWN){
+    const dir=color;let c=0;
+    if(r+dir>=0&&r+dir<=7){c++;if(f>0)c++;if(f<7)c++;}
+    if(r===(color===WHITE?1:6))c++;
+    return c;
+  }
+  if(pc===KNIGHT){
+    let c=0;
+    for(let i=0;i<8;i++){const nr=r+KNIGHT_DR[i],nf=f+KNIGHT_DF[i];if(nr>=0&&nr<8&&nf>=0&&nf<8)c++;}
+    return c;
+  }
+  if(pc===KING){
+    let c=0;
+    for(let dr=-1;dr<=1;dr++)for(let df=-1;df<=1;df++){if(!dr&&!df)continue;const nr=r+dr,nf=f+df;if(nr>=0&&nr<8&&nf>=0&&nf<8)c++;}
+    return c;
+  }
+  const dirs=pc===BISHOP?[4,5,6,7]:pc===ROOK?[0,1,2,3]:[0,1,2,3,4,5,6,7];
+  let c=0;
+  for(const d of dirs){let cr=r+SLIDE_DIRS[d][0],cf=f+SLIDE_DIRS[d][1];while(cr>=0&&cr<8&&cf>=0&&cf<8){c++;cr+=SLIDE_DIRS[d][0];cf+=SLIDE_DIRS[d][1];}}
+  return c;
+}
+
+function computeFeatures(pos){
   const b=pos.board,feat=new Float64Array(NF);
   const srcW=new Float64Array(64),srcB=new Float64Array(64);
   let wkSq=-1,bkSq=-1;
   let nPawns=0,nThermal=0;
   let pawnCountW=0,pawnCountB=0,pawnAdvW=0,pawnAdvB=0;
   const pawnFilesW=[],pawnFilesB=[];
-  const PIECE_VAL=[0,1,3,3.25,5,9,0];
-  let matW=0,matB=0;
 
-  // Pass 1: compute source charges q = log(1+m) at piece positions
+  // Pass 1: per-piece entropy s_i = f_i * ln(2 + m_i)
   for(let sq=0;sq<64;sq++){
     if(!b[sq])continue;
     const apc=Math.abs(b[sq]),color=Math.sign(b[sq]);
     if(apc===KING){if(color===WHITE)wkSq=sq;else bkSq=sq;}
     const mob=pieceMobility(b,sq,pos.ep);
-    const q=Math.log(1+mob);
-    let weight=1.0;
-    if(apc===PAWN){weight=wPawn;nPawns++;
+    const fi=xrayMobility(apc,sq,color);
+    const si=fi*Math.log(2+mob);
+    if(apc===PAWN){nPawns++;
       if(color===WHITE){pawnCountW++;pawnAdvW+=(sq>>3)-1;pawnFilesW.push(sq&7);}
       else{pawnCountB++;pawnAdvB+=6-(sq>>3);pawnFilesB.push(sq&7);}
-    }else if(apc===KING){weight=wKing;}
-    else{nThermal++;}
-    if(color===WHITE){srcW[sq]=q*weight;matW+=PIECE_VAL[apc];}
-    else{srcB[sq]=q*weight;matB+=PIECE_VAL[apc];}
+    }else if(apc!==KING){nThermal++;}
+    if(color===WHITE)srcW[sq]=si;
+    else srcB[sq]=si;
   }
 
   // Pass 2: propagate sources into fields via lattice Green's function G=1/(1+d)
@@ -523,7 +541,7 @@ function computeFeatures(pos,wPawn,wKing){
     rhoW[x]=fw;rhoB[x]=fb;
   }
 
-  // Monopole (from source charges, not propagated field)
+  // Entropy monopole
   let Sw=0,Sb=0;
   for(let sq=0;sq<64;sq++){Sw+=srcW[sq];Sb+=srcB[sq];}
   feat[F_SW]=Sw;feat[F_SB]=Sb;feat[F_DS]=Sw-Sb;
@@ -567,7 +585,7 @@ function computeFeatures(pos,wPawn,wKing){
   // Anchor: e1 points toward rank 8 (positive y); e2 is right-handed
   if(e1y<0){e1x=-e1x;e1y=-e1y;e2x=-e2x;e2y=-e2y;}
 
-  // Dipole and quadrupole moments in eigenbasis (from source charges)
+  // Dipole and quadrupole moments in eigenbasis
   let d1w=0,d1b=0,d2w=0,d2b=0;
   let q11w=0,q11b=0,q22w=0,q22b=0,q12w=0,q12b=0;
   for(let sq=0;sq<64;sq++){
@@ -600,7 +618,7 @@ function computeFeatures(pos,wPawn,wKing){
     feat[F_AWK]=awk;feat[F_DWK]=dwk;feat[F_ABK]=abk;feat[F_DBK]=dbk;
   }
 
-  // Meta-entropy (charges are non-negative by construction with log(1+m))
+  // Meta-entropy (entropy values are non-negative by construction)
   if(Sw>1e-12){
     let eta=0;
     for(let sq=0;sq<64;sq++){
@@ -633,10 +651,6 @@ function computeFeatures(pos,wPawn,wKing){
   for(let x=0;x<64;x++)tau+=rhoW[x]*rhoB[x];
   feat[F_TAU]=tau;
 
-  // Officer material (pawn units: N=3, B=3.25, R=5, Q=9)
-  feat[F_MATW]=matW;
-  feat[F_MATB]=matB;
-
   return feat;
 }
 
@@ -645,7 +659,6 @@ function computeFeatures(pos,wPawn,wKing){
 // =========================================================================
 class Individual{
   constructor(){
-    this.wPawn=0.5;this.wKing=0.3;
     this.wLin=new Float64Array(NF);
     this.wQuad=new Float64Array(NQ);
     this.fitness=0;
@@ -664,7 +677,6 @@ class Individual{
   activeQuad(){let c=0;for(let i=0;i<NQ;i++)if(Math.abs(this.wQuad[i])>0.001)c++;return c;}
   clone(){
     const c=new Individual();
-    c.wPawn=this.wPawn;c.wKing=this.wKing;
     c.wLin.set(this.wLin);c.wQuad.set(this.wQuad);
     c.fitness=this.fitness;
     return c;
@@ -673,35 +685,34 @@ class Individual{
 
 function createSeeded(){
   const ind=new Individual();
-  ind.wPawn=0.5;ind.wKing=0.3;
 
-  // Linear weights (fitted from PGN database)
-  ind.wLin[0]=0.005611; // SW
-  ind.wLin[1]=-0.007351; // SB
-  ind.wLin[2]=0.086121; // DS
-  ind.wLin[3]=-0.000075; // D1W
-  ind.wLin[4]=0.000075; // D1B
-  ind.wLin[5]=-0.000869; // D2W
-  ind.wLin[6]=0.000869; // D2B
-  ind.wLin[7]=0.000316; // Q11W
-  ind.wLin[8]=-0.000366; // Q11B
-  ind.wLin[9]=0.000232; // Q22W
-  ind.wLin[10]=0.000214; // Q22B
-  ind.wLin[11]=0.000025; // Q12W
-  ind.wLin[12]=-0.000025; // Q12B
-  ind.wLin[13]=-0.003500; // AWK
-  ind.wLin[14]=0.000821; // DWK
-  ind.wLin[15]=0.001999; // ABK
-  ind.wLin[16]=-0.001569; // DBK
-  ind.wLin[17]=0.038177; // ETAW
-  ind.wLin[18]=-0.022551; // ETAB
+  // Linear weights (pre-K, DOF-entropy feature space)
+  ind.wLin[0]=0.000374; // SW
+  ind.wLin[1]=-0.000490; // SB
+  ind.wLin[2]=0.125000; // DS — dominant term, encodes material via xray DOF
+  ind.wLin[3]=-0.000005; // D1W
+  ind.wLin[4]=0.000005; // D1B
+  ind.wLin[5]=-0.000058; // D2W
+  ind.wLin[6]=0.000058; // D2B
+  ind.wLin[7]=0.000021; // Q11W
+  ind.wLin[8]=-0.000024; // Q11B
+  ind.wLin[9]=0.000015; // Q22W
+  ind.wLin[10]=0.000014; // Q22B
+  ind.wLin[11]=0.000002; // Q12W
+  ind.wLin[12]=-0.000002; // Q12B
+  ind.wLin[13]=-0.000233; // AWK
+  ind.wLin[14]=0.000055; // DWK
+  ind.wLin[15]=0.000133; // ABK
+  ind.wLin[16]=-0.000105; // DBK
+  ind.wLin[17]=0.038177; // ETAW (scale-invariant)
+  ind.wLin[18]=-0.022551; // ETAB (scale-invariant)
   ind.wLin[19]=0.033447; // PW
   ind.wLin[20]=-0.034471; // PB
   ind.wLin[21]=0.021838; // PADVW
   ind.wLin[22]=-0.027428; // PADVB
   ind.wLin[23]=0.016897; // PSPRW
   ind.wLin[24]=-0.007383; // PSPRB
-  ind.wLin[25]=0.000016; // TAU
+  ind.wLin[25]=0.0000001; // TAU
   ind.wLin[26]=-0.000164; // T0
 
   // Quadratic weights
@@ -1059,17 +1070,13 @@ function createSeeded(){
   ind.setQ(25,26,0.000008); // TAU*T0
   ind.setQ(26,26,-0.000001); // T0*T0
 
-  // Material weights (~100cp per pawn-unit in post-K scale)
-  ind.wLin[27]=0.25; // MATW
-  ind.wLin[28]=-0.25; // MATB
+  // Quadratic weights zeroed — old fitted values are invalid for DOF-entropy features.
+  // Re-fit from PGN data using fit_weights.py to restore quadratic interactions.
+  ind.wQuad.fill(0);
 
   // Scale from logistic regression units to centipawn-range units.
-  // The sigmoid maps [-5,+5] to [0%,100%] win probability;
-  // multiplying by 400 gives evaluations in the [-2000,+2000] range
-  // that the alpha-beta search needs for meaningful play.
   const K=400;
   for(let i=0;i<NF;i++)ind.wLin[i]*=K;
-  for(let i=0;i<NQ;i++)ind.wQuad[i]*=K;
 
   return ind;
 }
@@ -1123,12 +1130,10 @@ function createSeeded(){
 
 function createRandom(){
   const ind=new Individual();
-  ind.wPawn=0.2+Math.random()*0.6;
-  ind.wKing=0.1+Math.random()*0.5;
-  for(let i=0;i<NF;i++)ind.wLin[i]=(Math.random()-0.5)*40;
-  ind.wLin[F_DS]=40+Math.random()*80;
+  for(let i=0;i<NF;i++)ind.wLin[i]=(Math.random()-0.5)*3;
+  ind.wLin[F_DS]=30+Math.random()*40;
   for(let i=0;i<NQ;i++){
-    if(Math.random()<0.1)ind.wQuad[i]=(Math.random()-0.5)*4;
+    if(Math.random()<0.1)ind.wQuad[i]=(Math.random()-0.5)*0.2;
   }
   return ind;
 }
@@ -1149,7 +1154,7 @@ function clearKillers(){for(let i=0;i<MAX_PLY;i++)killers[i]=[null,null];}
 let searchNodes=0,searchAborted=false,searchMaxNodes=Infinity;
 
 function evalPos(pos,ind){
-  const feat=computeFeatures(pos,ind.wPawn,ind.wKing);
+  const feat=computeFeatures(pos);
   return pos.turn===WHITE?ind.evaluate(feat):-ind.evaluate(feat);
 }
 
@@ -1383,14 +1388,10 @@ function evolvePop(pop,gen,totalGens){
     const p1=pop[Math.floor(Math.random()*eliteCount)];
     const p2=pop[Math.floor(Math.random()*Math.ceil(K*0.5))];
     const child=new Individual();
-    child.wPawn=Math.random()<0.5?p1.wPawn:p2.wPawn;
-    child.wKing=Math.random()<0.5?p1.wKing:p2.wKing;
     for(let i=0;i<NF;i++)child.wLin[i]=Math.random()<0.5?p1.wLin[i]:p2.wLin[i];
     for(let i=0;i<NQ;i++)child.wQuad[i]=Math.random()<0.5?p1.wQuad[i]:p2.wQuad[i];
 
     // Mutation
-    if(Math.random()<0.3)child.wPawn=Math.max(0,Math.min(1,child.wPawn+(Math.random()-0.5)*0.15*mutScale));
-    if(Math.random()<0.3)child.wKing=Math.max(0,Math.min(1,child.wKing+(Math.random()-0.5)*0.15*mutScale));
     for(let i=0;i<NF;i++){
       if(Math.random()<0.25)child.wLin[i]+=gaussRand()*10*mutScale;
     }
@@ -1481,8 +1482,6 @@ function updateEvoUI(){
   document.getElementById('st-games').textContent=evoTotalGames;
   document.getElementById('st-fit').textContent=best.fitness.toFixed(1);
   document.getElementById('st-ds').textContent=best.wLin[F_DS].toFixed(1);
-  document.getElementById('st-wp').textContent=best.wPawn.toFixed(3);
-  document.getElementById('st-wk').textContent=best.wKing.toFixed(3);
   document.getElementById('st-aq').textContent=best.activeQuad();
   const pct=gens?((evoGen+1)/gens*100):0;
   document.getElementById('evo-prog').style.width=pct+'%';
@@ -1642,15 +1641,12 @@ function renderPlayBoard(){
     heatField=new Float64Array(64);
     for(let sq=0;sq<64;sq++){
       if(!pos.board[sq])continue;
-      const mob=pieceMobility(pos.board,sq,pos.ep);
-      const q=Math.log(1+mob);
       const apc=Math.abs(pos.board[sq]),color=Math.sign(pos.board[sq]);
-      let w=1;
-      if(apc===PAWN)w=engineWeights.wPawn;
-      else if(apc===KING)w=engineWeights.wKing;
-      const charge=q*w*color;
+      const mob=pieceMobility(pos.board,sq,pos.ep);
+      const fi=xrayMobility(apc,sq,color);
+      const si=fi*Math.log(2+mob)*color;
       for(let t=0;t<64;t++){
-        heatField[t]+=charge*GREEN[t*64+sq];
+        heatField[t]+=si*GREEN[t*64+sq];
       }
     }
   }
@@ -1824,7 +1820,7 @@ function setStatus(s){document.getElementById('game-status').textContent=s;}
 
 function updateDashboard(){
   if(!engineWeights)return;
-  const feat=computeFeatures(gamePos,engineWeights.wPawn,engineWeights.wKing);
+  const feat=computeFeatures(gamePos);
   const e=engineWeights.evaluate(feat);
 
   document.getElementById('td-Sw').textContent=feat[F_SW].toFixed(2);

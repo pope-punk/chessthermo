@@ -2,10 +2,10 @@
 """
 Fit the thermodynamic evaluation weights from a PGN database.
 
-Reimplements the lattice field theory feature extraction from
-chess_thermodynamics.html, then fits the 405-parameter equation
-of state (27 linear + 378 quadratic) via logistic regression on
-game outcomes.
+Reimplements the DOF-entropy feature extraction from
+chess_thermodynamics.html, then fits the equation of state
+(27 linear + 378 quadratic = 405 parameters) via logistic
+regression on game outcomes.
 
 Requirements:
     pip install python-chess scikit-learn numpy
@@ -32,7 +32,7 @@ from sklearn.linear_model import LogisticRegression
 # -------------------------------------------------------------------------
 #  Constants matching the JS engine
 # -------------------------------------------------------------------------
-NF = 29
+NF = 27
 NQ = NF * (NF + 1) // 2
 
 # Feature indices
@@ -43,7 +43,6 @@ F_AWK, F_DWK, F_ABK, F_DBK = 13, 14, 15, 16
 F_ETAW, F_ETAB = 17, 18
 F_PW, F_PB, F_PADVW, F_PADVB, F_PSPRW, F_PSPRB = 19, 20, 21, 22, 23, 24
 F_TAU, F_T0 = 25, 26
-F_MATW, F_MATB = 27, 28
 
 # Precompute Green's function: G(x,s) = 1/(1 + d_chebyshev(x,s))
 GREEN = np.zeros((64, 64), dtype=np.float64)
@@ -52,12 +51,47 @@ for a in range(64):
         d = max(abs((a & 7) - (b & 7)), abs((a >> 3) - (b >> 3)))
         GREEN[a, b] = 1.0 / (1.0 + d)
 
-# Piece type mapping: python-chess piece_type (1-6) to our constants
-# chess.PAWN=1, chess.KNIGHT=2, chess.BISHOP=3, chess.ROOK=4, chess.QUEEN=5, chess.KING=6
-PIECE_WEIGHTS_DEFAULT = {
-    chess.PAWN: 0.5,    # wPawn
-    chess.KING: 0.3,    # wKing
+KNIGHT_OFFSETS = [(-2, -1), (-2, 1), (-1, -2), (-1, 2), (1, -2), (1, 2), (2, -1), (2, 1)]
+SLIDE_DIRS_MAP = {
+    chess.BISHOP: [(1, 1), (1, -1), (-1, 1), (-1, -1)],
+    chess.ROOK: [(0, 1), (0, -1), (1, 0), (-1, 0)],
+    chess.QUEEN: [(0, 1), (0, -1), (1, 0), (-1, 0), (1, 1), (1, -1), (-1, 1), (-1, -1)],
 }
+
+
+def xray_mobility(piece_type: int, sq: int, color: bool) -> int:
+    r, f = sq >> 3, sq & 7
+    if piece_type == chess.PAWN:
+        d = 1 if color == chess.WHITE else -1
+        c = 0
+        nr = r + d
+        if 0 <= nr <= 7:
+            c += 1
+            if f > 0: c += 1
+            if f < 7: c += 1
+        if r == (1 if color == chess.WHITE else 6):
+            c += 1
+        return c
+    if piece_type == chess.KNIGHT:
+        return sum(1 for dr, df in KNIGHT_OFFSETS if 0 <= r + dr <= 7 and 0 <= f + df <= 7)
+    if piece_type == chess.KING:
+        c = 0
+        for dr in (-1, 0, 1):
+            for df in (-1, 0, 1):
+                if dr == 0 and df == 0:
+                    continue
+                if 0 <= r + dr <= 7 and 0 <= f + df <= 7:
+                    c += 1
+        return c
+    dirs = SLIDE_DIRS_MAP.get(piece_type, [])
+    c = 0
+    for dr, df in dirs:
+        cr, cf = r + dr, f + df
+        while 0 <= cr <= 7 and 0 <= cf <= 7:
+            c += 1
+            cr += dr
+            cf += df
+    return c
 
 # -------------------------------------------------------------------------
 #  Mobility computation (matches JS pieceMobility exactly)
@@ -141,7 +175,7 @@ def piece_mobility(board: chess.Board, sq: int) -> int:
 # -------------------------------------------------------------------------
 #  Feature extraction (matches JS computeFeatures exactly)
 # -------------------------------------------------------------------------
-def compute_features(board: chess.Board, w_pawn=0.5, w_king=0.3) -> np.ndarray:
+def compute_features(board: chess.Board) -> np.ndarray:
     feat = np.zeros(NF, dtype=np.float64)
     srcW = np.zeros(64, dtype=np.float64)
     srcB = np.zeros(64, dtype=np.float64)
@@ -152,7 +186,7 @@ def compute_features(board: chess.Board, w_pawn=0.5, w_king=0.3) -> np.ndarray:
     pawn_files_w = []
     pawn_files_b = []
 
-    # Pass 1: source charges q = log(1+m)
+    # Pass 1: per-piece entropy s_i = f_i * ln(2 + m_i)
     for sq in range(64):
         piece = board.piece_at(sq)
         if piece is None:
@@ -168,11 +202,10 @@ def compute_features(board: chess.Board, w_pawn=0.5, w_king=0.3) -> np.ndarray:
                 bk_sq = sq
 
         mob = piece_mobility(board, sq)
-        q = math.log(1 + mob)
+        fi = xray_mobility(pt, sq, color)
+        si = fi * math.log(2 + mob)
 
-        weight = 1.0
         if pt == chess.PAWN:
-            weight = w_pawn
             n_pawns += 1
             if color == chess.WHITE:
                 pawn_count_w += 1
@@ -182,15 +215,13 @@ def compute_features(board: chess.Board, w_pawn=0.5, w_king=0.3) -> np.ndarray:
                 pawn_count_b += 1
                 pawn_adv_b += 6 - (sq >> 3)
                 pawn_files_b.append(sq & 7)
-        elif pt == chess.KING:
-            weight = w_king
-        else:
+        elif pt != chess.KING:
             n_thermal += 1
 
         if color == chess.WHITE:
-            srcW[sq] = q * weight
+            srcW[sq] = si
         else:
-            srcB[sq] = q * weight
+            srcB[sq] = si
 
     # Pass 2: propagate via Green's function
     rhoW = GREEN @ srcW
@@ -320,21 +351,6 @@ def compute_features(board: chess.Board, w_pawn=0.5, w_king=0.3) -> np.ndarray:
     # Spatial tension
     feat[F_TAU] = (rhoW * rhoB).sum()
 
-    # Officer material (pawn units: N=3, B=3.25, R=5, Q=9)
-    piece_vals = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3.25,
-                  chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 0}
-    mat_w = mat_b = 0
-    for sq in range(64):
-        piece = board.piece_at(sq)
-        if piece is not None:
-            v = piece_vals.get(piece.piece_type, 0)
-            if piece.color == chess.WHITE:
-                mat_w += v
-            else:
-                mat_b += v
-    feat[F_MATW] = mat_w
-    feat[F_MATB] = mat_b
-
     return feat
 
 
@@ -359,7 +375,7 @@ FEATURE_NAMES = [
     "AWK", "DWK", "ABK", "DBK",
     "ETAW", "ETAB",
     "PW", "PB", "PADVW", "PADVB", "PSPRW", "PSPRB",
-    "TAU", "T0", "MATW", "MATB"
+    "TAU", "T0"
 ]
 
 
@@ -485,19 +501,17 @@ def fit_weights(X, y):
     return coeffs
 
 
-def emit_js(coeffs, w_pawn=0.5, w_king=0.3):
+def emit_js(coeffs):
     """Print the fitted weights as JS code for the HTML file."""
     lin = coeffs[:NF]
     quad = coeffs[NF:]
 
-    print("// ---- Fitted weights from PGN database (Texel-style) ----")
+    print("// ---- Fitted weights from PGN database (DOF-entropy paradigm) ----")
     print(f"// {NF} linear + {NQ} quadratic = {NF + NQ} parameters")
-    print(f"// wPawn={w_pawn}, wKing={w_king}")
     print()
 
     print("function createSeeded(){")
     print("  const ind=new Individual();")
-    print(f"  ind.wPawn={w_pawn};ind.wKing={w_king};")
     print()
     print("  // Linear weights")
     for i in range(NF):

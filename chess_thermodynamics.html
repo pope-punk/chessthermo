@@ -1248,6 +1248,7 @@ let gamePos=new Position();
 let engineWeights=null;
 const DIFFICULTIES={easy:200000,medium:1000000,hard:5000000,max:30000000};
 let thinkNodes=1000000;
+let lastSearchScore=0;
 function setDifficulty(lv){thinkNodes=DIFFICULTIES[lv]||1000000;}
 let selectedSq=-1;
 let legalMovesCache=[];
@@ -1466,6 +1467,8 @@ function executePlayerMove(m){
   lastMove=m;selectedSq=-1;legalMovesCache=[];
   recordMove(san);
   renderPlayBoard();
+  // Quick eval from engine's perspective after player's move
+  lastSearchScore=evalPos(gamePos,engineWeights);
   updateDashboard();
   if(checkGameEnd())return;
   setStatus('Thinking...');
@@ -1476,6 +1479,7 @@ async function aiMove(){
   ttClear();
   const m=bestMoveID(gamePos,engineWeights,20,thinkNodes);
   if(!m){checkGameEnd();return;}
+  lastSearchScore=m.score||0;
   const san=moveToSAN(gamePos,m);
   gamePos.makeMove(m);
   lastMove=m;
@@ -1532,13 +1536,11 @@ function updateDashboard(){
 
   const thermo=softMinimax(gamePos,thermoDepth,thermoT,engineWeights);
   const Fabs=gamePos.turn===WHITE?thermo.value:-thermo.value;
-  const e=Fabs/PAWN_XRAY;
 
   document.getElementById('td-F').textContent=Fabs.toFixed(1);
   document.getElementById('td-S').textContent=thermo.entropy.toFixed(3);
   document.getElementById('td-C').textContent=thermo.heat.toFixed(3);
   document.getElementById('td-T').textContent=thermoT.toFixed(1);
-  document.getElementById('td-E').textContent=e.toFixed(2);
 
   const mu=computeChemicalPotentials(gamePos,engineWeights);
   let muStr='';
@@ -1547,9 +1549,14 @@ function updateDashboard(){
   }
   document.getElementById('td-mu').textContent=muStr.trim()||'-';
 
-  const pct=100/(1+Math.exp(-e));
+  // Eval bar uses the engine's actual alpha-beta search score (from
+  // Black's perspective since engine plays Black). Convert to White's
+  // perspective and normalize to pawn units.
+  const searchE=-lastSearchScore/PAWN_XRAY;
+  document.getElementById('td-E').textContent=searchE.toFixed(2);
+  const pct=100/(1+Math.exp(-searchE));
   document.getElementById('eval-fill').style.width=Math.max(2,Math.min(98,pct))+'%';
-  document.getElementById('eval-text').textContent=(e>=0?'+':'')+e.toFixed(2);
+  document.getElementById('eval-text').textContent=(searchE>=0?'+':'')+searchE.toFixed(2);
 }
 
 // =========================================================================

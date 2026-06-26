@@ -580,8 +580,8 @@ function computeFeatures(pos){
     }
   }
 
-  // U (kinetic energy = legal moves)
-  feat[F_UW]=Uw;feat[F_UB]=Ub;
+  // U (internal energy = total xray mobility)
+  feat[F_UW]=totalXrayW;feat[F_UB]=totalXrayB;
 
   // T (temperature = move concentration)
   feat[F_TW]=moveConcentration(movesW,Uw);

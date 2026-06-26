@@ -4,7 +4,7 @@ Fit the thermodynamic PV (potential energy) weights from a PGN database.
 
 Reimplements the Gibbs free energy feature extraction from
 chess_thermodynamics.html:
-  - U = kinetic energy (total legal moves per side)
+  - U = internal energy (total xray mobility per side)
   - T = temperature (move concentration = M/exp(H) where H = Shannon entropy)
   - S = entropy (xray redundancy = 1 - |union xray squares| / sum(xray per piece))
   - dF = (U_w - T_w*S_w) - (U_b - T_b*S_b)
@@ -292,9 +292,9 @@ def compute_features(board: chess.Board) -> np.ndarray:
                 pawn_adv_b += 6 - (sq >> 3)
                 pawn_files_b.append(sq & 7)
 
-    # U (kinetic energy = legal moves)
-    feat[F_UW] = Uw
-    feat[F_UB] = Ub
+    # U (internal energy = total xray mobility)
+    feat[F_UW] = totalXrayW
+    feat[F_UB] = totalXrayB
 
     # T (temperature = move concentration)
     feat[F_TW] = move_concentration(movesW, Uw)

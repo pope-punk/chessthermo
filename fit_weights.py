@@ -451,15 +451,16 @@ INTERACTION_NAMES = [
 
 def extract_positions(pgn_path, max_games=50000, sample_every=8, skip_opening=10):
     """
-    Extract (interaction_features, dF) pairs from a PGN file.
+    Extract (interaction_features, PV_target) pairs from a PGN file.
 
-    Positions from well-played games sit near thermodynamic equilibrium
-    (G ~ 0), so PV ~ dF. We compute dF = (Uw - Tw*Sw) - (Ub - Tb*Sb)
-    as the regression target and the 23 interaction features as predictors.
+    The fitting target depends on game outcome:
+      - Draws: PV_target = dF (eval = dF - PV = 0 at equilibrium)
+      - White wins: PV_target = dF - moves_left/S_avg (eval = +moves_left/S_avg)
+      - Black wins: PV_target = dF + moves_left/S_avg (eval = -moves_left/S_avg)
 
     Returns:
         X: array of shape (n_positions, NF + NQ) - expanded interaction features
-        y: array of shape (n_positions,) - dF targets
+        y: array of shape (n_positions,) - PV targets
     """
     features_list = []
     targets = []
@@ -480,9 +481,12 @@ def extract_positions(pgn_path, max_games=50000, sample_every=8, skip_opening=10
                 print(f"  Processed {game_count} games, {len(features_list)} positions...",
                       file=sys.stderr)
 
+            moves_list = list(game.mainline_moves())
+            total_ply = len(moves_list)
+
             board = game.board()
             ply = 0
-            for move in game.mainline_moves():
+            for move in moves_list:
                 board.push(move)
                 ply += 1
 
@@ -492,7 +496,20 @@ def extract_positions(pgn_path, max_games=50000, sample_every=8, skip_opening=10
                     continue
 
                 feat = compute_features(board)
-                target = (feat[F_UW] - feat[F_TW] * feat[F_SW]) - (feat[F_UB] - feat[F_TB] * feat[F_SB])
+                dF = (feat[F_UW] - feat[F_TW] * feat[F_SW]) - (feat[F_UB] - feat[F_TB] * feat[F_SB])
+
+                moves_left = total_ply - ply
+                S_avg = max((feat[F_SW] + feat[F_SB]) / 2, 0.01)
+
+                if result == "1/2-1/2":
+                    target = dF
+                elif result == "1-0":
+                    target = dF - moves_left / S_avg
+                elif result == "0-1":
+                    target = dF + moves_left / S_avg
+                else:
+                    target = dF
+
                 interaction = feat[INT_OFF:INT_OFF + NF]
                 expanded = expand_quadratic(interaction)
                 features_list.append(expanded)
@@ -508,7 +525,7 @@ def extract_positions(pgn_path, max_games=50000, sample_every=8, skip_opening=10
 #  Fit and emit weights
 # -------------------------------------------------------------------------
 def fit_weights(X, y):
-    """Fit PV = dF via ridge regression on interaction features."""
+    """Fit PV via ridge regression on conditional targets."""
     from sklearn.preprocessing import StandardScaler
 
     scaler = StandardScaler()
@@ -583,9 +600,8 @@ def main():
         print("ERROR: Too few positions extracted. Need at least 100.", file=sys.stderr)
         sys.exit(1)
 
-    print(f"  Target dF: mean={y.mean():.2f}, std={y.std():.2f}", file=sys.stderr)
+    print(f"  Target PV: mean={y.mean():.2f}, std={y.std():.2f}", file=sys.stderr)
 
-    # Check for NaN/Inf in features or targets
     if np.any(np.isnan(X)) or np.any(np.isinf(X)):
         bad_cols = np.where(np.any(np.isnan(X) | np.isinf(X), axis=0))[0]
         print(f"WARNING: NaN/Inf in feature columns: {bad_cols}", file=sys.stderr)
@@ -594,7 +610,7 @@ def main():
         print(f"WARNING: NaN/Inf in targets, replacing with 0", file=sys.stderr)
         y = np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
 
-    print("Fitting PV = dF...", file=sys.stderr)
+    print("Fitting PV (conditional on game outcome)...", file=sys.stderr)
     coeffs = fit_weights(X, y)
 
     lin = coeffs[:NF]

@@ -527,6 +527,11 @@ def emit_js(coeffs):
                       f"// {FEATURE_NAMES[i]}*{FEATURE_NAMES[j]}")
             idx += 1
     print()
+    print("  // Scale from logistic regression units to centipawn-range units.")
+    print("  const K=400;")
+    print("  for(let i=0;i<NF;i++)ind.wLin[i]*=K;")
+    print("  for(let i=0;i<NQ;i++)ind.wQuad[i]*=K;")
+    print()
     print("  return ind;")
     print("}")
 

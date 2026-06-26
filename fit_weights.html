@@ -731,6 +731,10 @@ function generateJS(weights){
       idx++;
     }
   }
+  out+='\n  // Scale from logistic regression units to centipawn-range units.\n';
+  out+='  const K=400;\n';
+  out+='  for(let i=0;i<NF;i++)ind.wLin[i]*=K;\n';
+  out+='  for(let i=0;i<NQ;i++)ind.wQuad[i]*=K;\n';
   out+='\n  return ind;\n}';
 
   out+='\n\n// ---- Compact array form ----\n';

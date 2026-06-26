@@ -715,7 +715,7 @@ function createSeeded(){
   ind.wLin[25]=0.000000; // TAU
   ind.wLin[26]=-0.000195; // T0
 
-  // Quadratic weights
+  // Quadratic weights (fitted from PGN database)
   ind.setQ(0,17,0.000285); // SW*ETAW
   ind.setQ(0,18,-0.000135); // SW*ETAB
   ind.setQ(0,19,0.000015); // SW*PW
@@ -910,6 +910,11 @@ function createSeeded(){
   ind.setQ(24,24,-0.000268); // PSPRB*PSPRB
   ind.setQ(24,26,-0.000226); // PSPRB*T0
   ind.setQ(26,26,0.000003); // T0*T0
+
+  // Scale from logistic regression units to centipawn-range units.
+  const K=400;
+  for(let i=0;i<NF;i++)ind.wLin[i]*=K;
+  for(let i=0;i<NQ;i++)ind.wQuad[i]*=K;
 
   return ind;
 }

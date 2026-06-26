@@ -93,8 +93,12 @@ select{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:6px 10p
   </div>
   <div class="evo-controls">
     <button class="primary" onclick="startEvo('quick')">Quick Train (10 gen)</button>
-    <button onclick="startEvo('standard')">Standard (25 gen)</button>
-    <button onclick="startEvo('full')">Full (50 gen)</button>
+    <button onclick="startEvo('standard')">Standard (50 gen)</button>
+    <button onclick="startEvo('full')">Full (200 gen)</button>
+    <div style="display:inline-flex;align-items:center;gap:6px;margin-left:8px">
+      <input id="custom-gens" type="number" min="1" max="10000" value="1000" style="width:80px;padding:6px 8px;border:1px solid #555;border-radius:6px;background:#1a1a2e;color:#e0e0e0;font-size:14px;text-align:center">
+      <button onclick="startEvo('custom')">Custom</button>
+    </div>
     <button onclick="skipToPlay()" style="border-color:#f0883e;color:#f0883e">Skip &rarr; Play</button>
   </div>
   <div class="evo-body">
@@ -1259,9 +1263,15 @@ function updateDashboard(){
 function startEvo(mode){
   const configs={
     quick:{K:8,G:2,gens:10},
-    standard:{K:10,G:2,gens:25},
-    full:{K:12,G:2,gens:50}
+    standard:{K:10,G:2,gens:50},
+    full:{K:12,G:2,gens:200}
   };
+  if(mode==='custom'){
+    const v=Math.max(1,Math.min(10000,parseInt(document.getElementById('custom-gens').value)||50));
+    const K=v<=50?8:v<=500?10:12;
+    const G=v<=100?2:v<=1000?3:4;
+    return runEvolution({K,G,gens:v});
+  }
   const c=configs[mode]||configs.standard;
   runEvolution(c);
 }

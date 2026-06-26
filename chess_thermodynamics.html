@@ -686,400 +686,280 @@ class Individual{
 function createSeeded(){
   const ind=new Individual();
 
-  // Linear weights (pre-K, DOF-entropy feature space)
-  ind.wLin[0]=0.000374; // SW
-  ind.wLin[1]=-0.000490; // SB
-  ind.wLin[2]=0.125000; // DS — dominant term, encodes material via xray DOF
-  ind.wLin[3]=-0.000005; // D1W
-  ind.wLin[4]=0.000005; // D1B
-  ind.wLin[5]=-0.000058; // D2W
-  ind.wLin[6]=0.000058; // D2B
-  ind.wLin[7]=0.000021; // Q11W
-  ind.wLin[8]=-0.000024; // Q11B
-  ind.wLin[9]=0.000015; // Q22W
-  ind.wLin[10]=0.000014; // Q22B
-  ind.wLin[11]=0.000002; // Q12W
-  ind.wLin[12]=-0.000002; // Q12B
-  ind.wLin[13]=-0.000233; // AWK
-  ind.wLin[14]=0.000055; // DWK
-  ind.wLin[15]=0.000133; // ABK
-  ind.wLin[16]=-0.000105; // DBK
-  ind.wLin[17]=0.038177; // ETAW (scale-invariant)
-  ind.wLin[18]=-0.022551; // ETAB (scale-invariant)
-  ind.wLin[19]=0.033447; // PW
-  ind.wLin[20]=-0.034471; // PB
-  ind.wLin[21]=0.021838; // PADVW
-  ind.wLin[22]=-0.027428; // PADVB
-  ind.wLin[23]=0.016897; // PSPRW
-  ind.wLin[24]=-0.007383; // PSPRB
-  ind.wLin[25]=0.0000001; // TAU
-  ind.wLin[26]=-0.000164; // T0
+  // Linear weights (DOF-entropy, fitted from PGN database)
+  ind.wLin[0]=0.000482; // SW
+  ind.wLin[1]=-0.000583; // SB
+  ind.wLin[2]=0.006302; // DS
+  ind.wLin[3]=-0.000010; // D1W
+  ind.wLin[4]=0.000010; // D1B
+  ind.wLin[5]=-0.000091; // D2W
+  ind.wLin[6]=0.000091; // D2B
+  ind.wLin[7]=0.000022; // Q11W
+  ind.wLin[8]=-0.000018; // Q11B
+  ind.wLin[9]=0.000024; // Q22W
+  ind.wLin[10]=0.000006; // Q22B
+  ind.wLin[11]=0.000026; // Q12W
+  ind.wLin[12]=-0.000026; // Q12B
+  ind.wLin[13]=-0.000337; // AWK
+  ind.wLin[14]=-0.000013; // DWK
+  ind.wLin[15]=0.000227; // ABK
+  ind.wLin[16]=-0.000044; // DBK
+  ind.wLin[17]=0.194209; // ETAW
+  ind.wLin[18]=-0.187563; // ETAB
+  ind.wLin[19]=0.027884; // PW
+  ind.wLin[20]=-0.024796; // PB
+  ind.wLin[21]=0.019747; // PADVW
+  ind.wLin[22]=-0.022358; // PADVB
+  ind.wLin[23]=0.015105; // PSPRW
+  ind.wLin[24]=-0.005249; // PSPRB
+  ind.wLin[25]=0.000000; // TAU
+  ind.wLin[26]=-0.000195; // T0
 
   // Quadratic weights
-  ind.setQ(0,0,0.000068); // SW*SW
-  ind.setQ(0,1,0.000046); // SW*SB
-  ind.setQ(0,2,0.000867); // SW*DS
-  ind.setQ(0,3,0.000039); // SW*D1W
-  ind.setQ(0,4,-0.000039); // SW*D1B
-  ind.setQ(0,5,-0.000045); // SW*D2W
-  ind.setQ(0,6,0.000045); // SW*D2B
-  ind.setQ(0,7,0.000007); // SW*Q11W
-  ind.setQ(0,8,0.000009); // SW*Q11B
-  ind.setQ(0,9,-0.000006); // SW*Q22W
-  ind.setQ(0,10,0.000011); // SW*Q22B
-  ind.setQ(0,11,-0.000027); // SW*Q12W
-  ind.setQ(0,12,0.000027); // SW*Q12B
-  ind.setQ(0,13,-0.000007); // SW*AWK
-  ind.setQ(0,14,-0.000011); // SW*DWK
-  ind.setQ(0,15,0.000052); // SW*ABK
-  ind.setQ(0,16,0.000043); // SW*DBK
-  ind.setQ(0,17,0.000951); // SW*ETAW
-  ind.setQ(0,18,0.000482); // SW*ETAB
-  ind.setQ(0,19,0.000397); // SW*PW
-  ind.setQ(0,20,-0.000439); // SW*PB
-  ind.setQ(0,21,0.000147); // SW*PADVW
-  ind.setQ(0,22,0.000576); // SW*PADVB
-  ind.setQ(0,23,0.000046); // SW*PSPRW
-  ind.setQ(0,24,0.000419); // SW*PSPRB
-  ind.setQ(0,26,0.001988); // SW*T0
-  ind.setQ(1,1,-0.000205); // SB*SB
-  ind.setQ(1,2,0.000756); // SB*DS
-  ind.setQ(1,3,-0.000023); // SB*D1W
-  ind.setQ(1,4,0.000023); // SB*D1B
-  ind.setQ(1,5,-0.000048); // SB*D2W
-  ind.setQ(1,6,0.000048); // SB*D2B
-  ind.setQ(1,8,-0.000014); // SB*Q11B
-  ind.setQ(1,9,-0.000003); // SB*Q22W
-  ind.setQ(1,10,-0.000023); // SB*Q22B
-  ind.setQ(1,11,-0.000029); // SB*Q12W
-  ind.setQ(1,12,0.000029); // SB*Q12B
-  ind.setQ(1,13,-0.000097); // SB*AWK
-  ind.setQ(1,14,-0.000012); // SB*DWK
-  ind.setQ(1,15,0.000028); // SB*ABK
-  ind.setQ(1,16,-0.000018); // SB*DBK
-  ind.setQ(1,17,0.000524); // SB*ETAW
-  ind.setQ(1,18,-0.001461); // SB*ETAB
-  ind.setQ(1,19,0.000768); // SB*PW
-  ind.setQ(1,20,-0.000638); // SB*PB
-  ind.setQ(1,21,-0.000200); // SB*PADVW
-  ind.setQ(1,22,-0.000104); // SB*PADVB
-  ind.setQ(1,23,-0.000281); // SB*PSPRW
-  ind.setQ(1,24,-0.000283); // SB*PSPRB
-  ind.setQ(1,25,0.000002); // SB*TAU
-  ind.setQ(1,26,-0.001595); // SB*T0
-  ind.setQ(2,2,0.001241); // DS*DS
-  ind.setQ(2,3,0.002575); // DS*D1W
-  ind.setQ(2,4,-0.002575); // DS*D1B
-  ind.setQ(2,5,0.000097); // DS*D2W
-  ind.setQ(2,6,-0.000097); // DS*D2B
-  ind.setQ(2,7,0.000271); // DS*Q11W
-  ind.setQ(2,8,-0.000206); // DS*Q11B
-  ind.setQ(2,9,-0.000043); // DS*Q22W
-  ind.setQ(2,10,-0.000391); // DS*Q22B
-  ind.setQ(2,11,0.000153); // DS*Q12W
-  ind.setQ(2,12,-0.000153); // DS*Q12B
-  ind.setQ(2,13,0.000547); // DS*AWK
-  ind.setQ(2,14,-0.000004); // DS*DWK
-  ind.setQ(2,15,0.000708); // DS*ABK
-  ind.setQ(2,16,0.000161); // DS*DBK
-  ind.setQ(2,17,0.010823); // DS*ETAW
-  ind.setQ(2,18,0.012486); // DS*ETAB
-  ind.setQ(2,19,-0.008721); // DS*PW
-  ind.setQ(2,20,-0.006686); // DS*PB
-  ind.setQ(2,21,0.006526); // DS*PADVW
-  ind.setQ(2,22,0.005955); // DS*PADVB
-  ind.setQ(2,23,0.005971); // DS*PSPRW
-  ind.setQ(2,24,0.004372); // DS*PSPRB
-  ind.setQ(2,25,-0.000113); // DS*TAU
-  ind.setQ(2,26,0.003839); // DS*T0
-  ind.setQ(3,3,-0.000007); // D1W*D1W
-  ind.setQ(3,4,0.000007); // D1W*D1B
-  ind.setQ(3,5,-0.000066); // D1W*D2W
-  ind.setQ(3,6,0.000066); // D1W*D2B
-  ind.setQ(3,8,-0.000004); // D1W*Q11B
-  ind.setQ(3,9,0.000007); // D1W*Q22W
-  ind.setQ(3,10,-0.000006); // D1W*Q22B
-  ind.setQ(3,11,-0.000017); // D1W*Q12W
-  ind.setQ(3,12,0.000017); // D1W*Q12B
-  ind.setQ(3,13,-0.000010); // D1W*AWK
-  ind.setQ(3,14,0.000016); // D1W*DWK
-  ind.setQ(3,15,0.000009); // D1W*ABK
-  ind.setQ(3,16,-0.000018); // D1W*DBK
-  ind.setQ(3,17,-0.000037); // D1W*ETAW
-  ind.setQ(3,18,0.000070); // D1W*ETAB
-  ind.setQ(3,19,0.000019); // D1W*PW
-  ind.setQ(3,20,0.000044); // D1W*PB
-  ind.setQ(3,21,0.000208); // D1W*PADVW
-  ind.setQ(3,22,-0.000272); // D1W*PADVB
-  ind.setQ(3,23,0.000083); // D1W*PSPRW
-  ind.setQ(3,24,0.000017); // D1W*PSPRB
-  ind.setQ(3,26,-0.000012); // D1W*T0
-  ind.setQ(4,4,-0.000007); // D1B*D1B
-  ind.setQ(4,5,0.000066); // D1B*D2W
-  ind.setQ(4,6,-0.000066); // D1B*D2B
-  ind.setQ(4,8,0.000004); // D1B*Q11B
-  ind.setQ(4,9,-0.000007); // D1B*Q22W
-  ind.setQ(4,10,0.000006); // D1B*Q22B
-  ind.setQ(4,11,0.000017); // D1B*Q12W
-  ind.setQ(4,12,-0.000017); // D1B*Q12B
-  ind.setQ(4,13,0.000010); // D1B*AWK
-  ind.setQ(4,14,-0.000016); // D1B*DWK
-  ind.setQ(4,15,-0.000009); // D1B*ABK
-  ind.setQ(4,16,0.000018); // D1B*DBK
-  ind.setQ(4,17,0.000037); // D1B*ETAW
-  ind.setQ(4,18,-0.000070); // D1B*ETAB
-  ind.setQ(4,19,-0.000019); // D1B*PW
-  ind.setQ(4,20,-0.000044); // D1B*PB
-  ind.setQ(4,21,-0.000208); // D1B*PADVW
-  ind.setQ(4,22,0.000272); // D1B*PADVB
-  ind.setQ(4,23,-0.000083); // D1B*PSPRW
-  ind.setQ(4,24,-0.000017); // D1B*PSPRB
-  ind.setQ(4,26,0.000012); // D1B*T0
-  ind.setQ(5,5,-0.000030); // D2W*D2W
-  ind.setQ(5,6,0.000030); // D2W*D2B
-  ind.setQ(5,7,-0.000015); // D2W*Q11W
-  ind.setQ(5,8,-0.000030); // D2W*Q11B
-  ind.setQ(5,9,-0.000004); // D2W*Q22W
-  ind.setQ(5,10,0.000016); // D2W*Q22B
-  ind.setQ(5,11,-0.000094); // D2W*Q12W
-  ind.setQ(5,12,0.000094); // D2W*Q12B
-  ind.setQ(5,13,-0.000018); // D2W*AWK
-  ind.setQ(5,14,0.000002); // D2W*DWK
-  ind.setQ(5,15,-0.000015); // D2W*ABK
-  ind.setQ(5,16,0.000007); // D2W*DBK
-  ind.setQ(5,17,-0.000071); // D2W*ETAW
-  ind.setQ(5,18,0.000330); // D2W*ETAB
-  ind.setQ(5,19,0.000302); // D2W*PW
-  ind.setQ(5,20,0.000308); // D2W*PB
-  ind.setQ(5,21,0.000168); // D2W*PADVW
-  ind.setQ(5,22,-0.000119); // D2W*PADVB
-  ind.setQ(5,23,-0.000356); // D2W*PSPRW
-  ind.setQ(5,24,-0.000174); // D2W*PSPRB
-  ind.setQ(5,25,0.000002); // D2W*TAU
-  ind.setQ(5,26,0.000141); // D2W*T0
-  ind.setQ(6,6,-0.000030); // D2B*D2B
-  ind.setQ(6,7,0.000015); // D2B*Q11W
-  ind.setQ(6,8,0.000030); // D2B*Q11B
-  ind.setQ(6,9,0.000004); // D2B*Q22W
-  ind.setQ(6,10,-0.000016); // D2B*Q22B
-  ind.setQ(6,11,0.000094); // D2B*Q12W
-  ind.setQ(6,12,-0.000094); // D2B*Q12B
-  ind.setQ(6,13,0.000018); // D2B*AWK
-  ind.setQ(6,14,-0.000002); // D2B*DWK
-  ind.setQ(6,15,0.000015); // D2B*ABK
-  ind.setQ(6,16,-0.000007); // D2B*DBK
-  ind.setQ(6,17,0.000071); // D2B*ETAW
-  ind.setQ(6,18,-0.000330); // D2B*ETAB
-  ind.setQ(6,19,-0.000302); // D2B*PW
-  ind.setQ(6,20,-0.000308); // D2B*PB
-  ind.setQ(6,21,-0.000168); // D2B*PADVW
-  ind.setQ(6,22,0.000119); // D2B*PADVB
-  ind.setQ(6,23,0.000356); // D2B*PSPRW
-  ind.setQ(6,24,0.000174); // D2B*PSPRB
-  ind.setQ(6,25,-0.000002); // D2B*TAU
-  ind.setQ(6,26,-0.000141); // D2B*T0
-  ind.setQ(7,7,0.000001); // Q11W*Q11W
-  ind.setQ(7,10,0.000001); // Q11W*Q22B
-  ind.setQ(7,11,-0.000023); // Q11W*Q12W
-  ind.setQ(7,12,0.000023); // Q11W*Q12B
-  ind.setQ(7,13,-0.000003); // Q11W*AWK
-  ind.setQ(7,14,-0.000002); // Q11W*DWK
-  ind.setQ(7,15,0.000006); // Q11W*ABK
-  ind.setQ(7,16,0.000005); // Q11W*DBK
-  ind.setQ(7,17,0.000095); // Q11W*ETAW
-  ind.setQ(7,18,0.000045); // Q11W*ETAB
-  ind.setQ(7,19,0.000030); // Q11W*PW
-  ind.setQ(7,20,-0.000038); // Q11W*PB
-  ind.setQ(7,21,-0.000012); // Q11W*PADVW
-  ind.setQ(7,22,0.000082); // Q11W*PADVB
-  ind.setQ(7,23,-0.000033); // Q11W*PSPRW
-  ind.setQ(7,24,0.000050); // Q11W*PSPRB
-  ind.setQ(7,26,0.000093); // Q11W*T0
-  ind.setQ(8,9,0.000003); // Q11B*Q22W
-  ind.setQ(8,10,-0.000001); // Q11B*Q22B
-  ind.setQ(8,11,0.000010); // Q11B*Q12W
-  ind.setQ(8,12,-0.000010); // Q11B*Q12B
-  ind.setQ(8,13,-0.000006); // Q11B*AWK
-  ind.setQ(8,15,0.000006); // Q11B*ABK
-  ind.setQ(8,16,0.000002); // Q11B*DBK
-  ind.setQ(8,17,0.000098); // Q11B*ETAW
-  ind.setQ(8,18,-0.000119); // Q11B*ETAB
-  ind.setQ(8,19,0.000074); // Q11B*PW
-  ind.setQ(8,20,-0.000054); // Q11B*PB
-  ind.setQ(8,21,-0.000030); // Q11B*PADVW
-  ind.setQ(8,22,0.000015); // Q11B*PADVB
-  ind.setQ(8,23,-0.000012); // Q11B*PSPRW
-  ind.setQ(8,24,-0.000019); // Q11B*PSPRB
-  ind.setQ(8,26,-0.000148); // Q11B*T0
-  ind.setQ(9,9,0.000003); // Q22W*Q22W
-  ind.setQ(9,10,0.000002); // Q22W*Q22B
-  ind.setQ(9,11,0.000002); // Q22W*Q12W
-  ind.setQ(9,12,-0.000002); // Q22W*Q12B
-  ind.setQ(9,13,-0.000004); // Q22W*AWK
-  ind.setQ(9,14,-0.000006); // Q22W*DWK
-  ind.setQ(9,15,0.000004); // Q22W*ABK
-  ind.setQ(9,16,0.000007); // Q22W*DBK
-  ind.setQ(9,17,0.000059); // Q22W*ETAW
-  ind.setQ(9,18,-0.000011); // Q22W*ETAB
-  ind.setQ(9,19,0.000010); // Q22W*PW
-  ind.setQ(9,20,-0.000042); // Q22W*PB
-  ind.setQ(9,21,-0.000135); // Q22W*PADVW
-  ind.setQ(9,22,0.000102); // Q22W*PADVB
-  ind.setQ(9,23,-0.000122); // Q22W*PSPRW
-  ind.setQ(9,24,0.000033); // Q22W*PSPRB
-  ind.setQ(9,26,0.000285); // Q22W*T0
-  ind.setQ(10,10,-0.000002); // Q22B*Q22B
-  ind.setQ(10,11,-0.000011); // Q22B*Q12W
-  ind.setQ(10,12,0.000011); // Q22B*Q12B
-  ind.setQ(10,13,-0.000010); // Q22B*AWK
-  ind.setQ(10,14,-0.000002); // Q22B*DWK
-  ind.setQ(10,15,0.000008); // Q22B*ABK
-  ind.setQ(10,16,0.000003); // Q22B*DBK
-  ind.setQ(10,17,0.000114); // Q22B*ETAW
-  ind.setQ(10,18,0.000099); // Q22B*ETAB
-  ind.setQ(10,19,0.000058); // Q22B*PW
-  ind.setQ(10,20,-0.000061); // Q22B*PB
-  ind.setQ(10,21,-0.000089); // Q22B*PADVW
-  ind.setQ(10,22,0.000155); // Q22B*PADVB
-  ind.setQ(10,23,-0.000018); // Q22B*PSPRW
-  ind.setQ(10,24,0.000030); // Q22B*PSPRB
-  ind.setQ(10,26,-0.000235); // Q22B*T0
-  ind.setQ(11,11,0.000005); // Q12W*Q12W
-  ind.setQ(11,12,-0.000005); // Q12W*Q12B
-  ind.setQ(11,13,0.000004); // Q12W*AWK
-  ind.setQ(11,14,0.000002); // Q12W*DWK
-  ind.setQ(11,15,-0.000002); // Q12W*ABK
-  ind.setQ(11,16,-0.000001); // Q12W*DBK
-  ind.setQ(11,17,0.000033); // Q12W*ETAW
-  ind.setQ(11,18,-0.000214); // Q12W*ETAB
-  ind.setQ(11,19,-0.000097); // Q12W*PW
-  ind.setQ(11,20,0.000182); // Q12W*PB
-  ind.setQ(11,21,0.000065); // Q12W*PADVW
-  ind.setQ(11,22,-0.000042); // Q12W*PADVB
-  ind.setQ(11,23,-0.000022); // Q12W*PSPRW
-  ind.setQ(11,24,0.000147); // Q12W*PSPRB
-  ind.setQ(12,12,0.000005); // Q12B*Q12B
-  ind.setQ(12,13,-0.000004); // Q12B*AWK
-  ind.setQ(12,14,-0.000002); // Q12B*DWK
-  ind.setQ(12,15,0.000002); // Q12B*ABK
-  ind.setQ(12,16,0.000001); // Q12B*DBK
-  ind.setQ(12,17,-0.000033); // Q12B*ETAW
-  ind.setQ(12,18,0.000214); // Q12B*ETAB
-  ind.setQ(12,19,0.000097); // Q12B*PW
-  ind.setQ(12,20,-0.000182); // Q12B*PB
-  ind.setQ(12,21,-0.000065); // Q12B*PADVW
-  ind.setQ(12,22,0.000042); // Q12B*PADVB
-  ind.setQ(12,23,0.000022); // Q12B*PSPRW
-  ind.setQ(12,24,-0.000147); // Q12B*PSPRB
-  ind.setQ(13,13,-0.000047); // AWK*AWK
-  ind.setQ(13,14,-0.000010); // AWK*DWK
-  ind.setQ(13,16,-0.000015); // AWK*DBK
-  ind.setQ(13,17,-0.000371); // AWK*ETAW
-  ind.setQ(13,18,-0.000628); // AWK*ETAB
-  ind.setQ(13,19,0.000296); // AWK*PW
-  ind.setQ(13,20,-0.000259); // AWK*PB
-  ind.setQ(13,21,-0.000036); // AWK*PADVW
-  ind.setQ(13,22,-0.000189); // AWK*PADVB
-  ind.setQ(13,23,-0.000255); // AWK*PSPRW
-  ind.setQ(13,24,-0.000140); // AWK*PSPRB
-  ind.setQ(13,26,-0.000135); // AWK*T0
-  ind.setQ(14,14,-0.000011); // DWK*DWK
-  ind.setQ(14,15,0.000002); // DWK*ABK
-  ind.setQ(14,16,0.000004); // DWK*DBK
-  ind.setQ(14,17,0.000074); // DWK*ETAW
-  ind.setQ(14,18,-0.000046); // DWK*ETAB
-  ind.setQ(14,19,0.000072); // DWK*PW
-  ind.setQ(14,20,-0.000166); // DWK*PB
-  ind.setQ(14,21,0.000061); // DWK*PADVW
-  ind.setQ(14,22,0.000073); // DWK*PADVB
-  ind.setQ(14,23,-0.000037); // DWK*PSPRW
-  ind.setQ(14,24,0.000028); // DWK*PSPRB
-  ind.setQ(14,26,0.000292); // DWK*T0
-  ind.setQ(15,15,0.000026); // ABK*ABK
-  ind.setQ(15,16,0.000015); // ABK*DBK
-  ind.setQ(15,17,0.000425); // ABK*ETAW
-  ind.setQ(15,18,0.000234); // ABK*ETAB
-  ind.setQ(15,19,0.000189); // ABK*PW
-  ind.setQ(15,20,-0.000158); // ABK*PB
-  ind.setQ(15,21,0.000171); // ABK*PADVW
-  ind.setQ(15,22,0.000060); // ABK*PADVB
-  ind.setQ(15,23,0.000074); // ABK*PSPRW
-  ind.setQ(15,24,0.000163); // ABK*PSPRB
-  ind.setQ(15,26,0.000092); // ABK*T0
-  ind.setQ(16,16,0.000003); // DBK*DBK
-  ind.setQ(16,17,0.000328); // DBK*ETAW
-  ind.setQ(16,18,-0.000186); // DBK*ETAB
-  ind.setQ(16,19,0.000266); // DBK*PW
-  ind.setQ(16,20,-0.000126); // DBK*PB
-  ind.setQ(16,21,-0.000018); // DBK*PADVW
-  ind.setQ(16,22,-0.000132); // DBK*PADVB
-  ind.setQ(16,23,0.000009); // DBK*PSPRW
-  ind.setQ(16,24,-0.000012); // DBK*PSPRB
-  ind.setQ(16,25,0.000001); // DBK*TAU
-  ind.setQ(16,26,-0.000294); // DBK*T0
-  ind.setQ(17,17,0.010383); // ETAW*ETAW
-  ind.setQ(17,18,0.005314); // ETAW*ETAB
-  ind.setQ(17,19,0.005543); // ETAW*PW
-  ind.setQ(17,20,-0.002904); // ETAW*PB
-  ind.setQ(17,21,0.000473); // ETAW*PADVW
-  ind.setQ(17,22,-0.001266); // ETAW*PADVB
-  ind.setQ(17,23,0.001832); // ETAW*PSPRW
-  ind.setQ(17,24,0.001128); // ETAW*PSPRB
-  ind.setQ(17,25,0.000006); // ETAW*TAU
-  ind.setQ(17,26,0.000081); // ETAW*T0
-  ind.setQ(18,18,-0.008187); // ETAB*ETAB
-  ind.setQ(18,19,0.005488); // ETAB*PW
-  ind.setQ(18,20,-0.005877); // ETAB*PB
-  ind.setQ(18,21,0.001489); // ETAB*PADVW
-  ind.setQ(18,22,-0.001445); // ETAB*PADVB
-  ind.setQ(18,23,0.002320); // ETAB*PSPRW
-  ind.setQ(18,24,-0.000729); // ETAB*PSPRB
-  ind.setQ(18,25,0.000004); // ETAB*TAU
-  ind.setQ(18,26,0.000704); // ETAB*T0
-  ind.setQ(19,19,0.002060); // PW*PW
-  ind.setQ(19,20,0.000109); // PW*PB
-  ind.setQ(19,21,0.000351); // PW*PADVW
-  ind.setQ(19,22,0.002555); // PW*PADVB
-  ind.setQ(19,23,0.002033); // PW*PSPRW
-  ind.setQ(19,24,0.001781); // PW*PSPRB
-  ind.setQ(19,25,0.000005); // PW*TAU
-  ind.setQ(19,26,0.001919); // PW*T0
-  ind.setQ(20,20,-0.002950); // PB*PB
-  ind.setQ(20,21,-0.002672); // PB*PADVW
-  ind.setQ(20,22,-0.002596); // PB*PADVB
-  ind.setQ(20,23,-0.001482); // PB*PSPRW
-  ind.setQ(20,24,-0.002377); // PB*PSPRB
-  ind.setQ(20,26,-0.002042); // PB*T0
-  ind.setQ(21,21,0.001273); // PADVW*PADVW
-  ind.setQ(21,22,0.000933); // PADVW*PADVB
-  ind.setQ(21,24,-0.000619); // PADVW*PSPRB
-  ind.setQ(21,25,-0.000005); // PADVW*TAU
-  ind.setQ(21,26,0.000700); // PADVW*T0
-  ind.setQ(22,22,-0.001160); // PADVB*PADVB
-  ind.setQ(22,23,0.000990); // PADVB*PSPRW
-  ind.setQ(22,24,0.000105); // PADVB*PSPRB
-  ind.setQ(22,25,0.000007); // PADVB*TAU
-  ind.setQ(22,26,-0.000617); // PADVB*T0
-  ind.setQ(23,23,-0.001226); // PSPRW*PSPRW
-  ind.setQ(23,24,-0.000115); // PSPRW*PSPRB
-  ind.setQ(23,25,-0.000008); // PSPRW*TAU
-  ind.setQ(23,26,0.000228); // PSPRW*T0
-  ind.setQ(24,24,0.000676); // PSPRB*PSPRB
-  ind.setQ(24,25,0.000005); // PSPRB*TAU
-  ind.setQ(24,26,-0.000350); // PSPRB*T0
-  ind.setQ(25,26,0.000008); // TAU*T0
-  ind.setQ(26,26,-0.000001); // T0*T0
-
-  // Quadratic weights zeroed — old fitted values are invalid for DOF-entropy features.
-  // Re-fit from PGN data using fit_weights.py to restore quadratic interactions.
-  ind.wQuad.fill(0);
-
-  // Scale from logistic regression units to centipawn-range units.
-  const K=400;
-  for(let i=0;i<NF;i++)ind.wLin[i]*=K;
+  ind.setQ(0,17,0.000285); // SW*ETAW
+  ind.setQ(0,18,-0.000135); // SW*ETAB
+  ind.setQ(0,19,0.000015); // SW*PW
+  ind.setQ(0,20,-0.000015); // SW*PB
+  ind.setQ(0,21,0.000012); // SW*PADVW
+  ind.setQ(0,22,0.000043); // SW*PADVB
+  ind.setQ(0,23,0.000006); // SW*PSPRW
+  ind.setQ(0,24,0.000039); // SW*PSPRB
+  ind.setQ(0,26,0.000078); // SW*T0
+  ind.setQ(1,2,-0.000003); // SB*DS
+  ind.setQ(1,17,0.000239); // SB*ETAW
+  ind.setQ(1,18,-0.000374); // SB*ETAB
+  ind.setQ(1,19,0.000035); // SB*PW
+  ind.setQ(1,20,-0.000039); // SB*PB
+  ind.setQ(1,21,-0.000016); // SB*PADVW
+  ind.setQ(1,22,-0.000012); // SB*PADVB
+  ind.setQ(1,23,-0.000023); // SB*PSPRW
+  ind.setQ(1,24,-0.000023); // SB*PSPRB
+  ind.setQ(1,26,-0.000074); // SB*T0
+  ind.setQ(2,2,0.000021); // DS*DS
+  ind.setQ(2,3,0.000011); // DS*D1W
+  ind.setQ(2,4,-0.000011); // DS*D1B
+  ind.setQ(2,8,-0.000002); // DS*Q11B
+  ind.setQ(2,10,-0.000002); // DS*Q22B
+  ind.setQ(2,14,-0.000001); // DS*DWK
+  ind.setQ(2,15,0.000002); // DS*ABK
+  ind.setQ(2,17,0.001336); // DS*ETAW
+  ind.setQ(2,18,0.002204); // DS*ETAB
+  ind.setQ(2,19,-0.000442); // DS*PW
+  ind.setQ(2,20,-0.000235); // DS*PB
+  ind.setQ(2,21,0.000499); // DS*PADVW
+  ind.setQ(2,22,0.000529); // DS*PADVB
+  ind.setQ(2,23,0.000505); // DS*PSPRW
+  ind.setQ(2,24,0.000494); // DS*PSPRB
+  ind.setQ(2,26,0.000174); // DS*T0
+  ind.setQ(3,17,-0.000028); // D1W*ETAW
+  ind.setQ(3,18,0.000033); // D1W*ETAB
+  ind.setQ(3,19,0.000003); // D1W*PW
+  ind.setQ(3,21,0.000008); // D1W*PADVW
+  ind.setQ(3,22,-0.000016); // D1W*PADVB
+  ind.setQ(3,23,0.000004); // D1W*PSPRW
+  ind.setQ(3,26,-0.000001); // D1W*T0
+  ind.setQ(4,17,0.000028); // D1B*ETAW
+  ind.setQ(4,18,-0.000033); // D1B*ETAB
+  ind.setQ(4,19,-0.000003); // D1B*PW
+  ind.setQ(4,21,-0.000008); // D1B*PADVW
+  ind.setQ(4,22,0.000016); // D1B*PADVB
+  ind.setQ(4,23,-0.000004); // D1B*PSPRW
+  ind.setQ(4,26,0.000001); // D1B*T0
+  ind.setQ(5,17,0.000008); // D2W*ETAW
+  ind.setQ(5,18,0.000065); // D2W*ETAB
+  ind.setQ(5,19,0.000033); // D2W*PW
+  ind.setQ(5,20,0.000029); // D2W*PB
+  ind.setQ(5,21,0.000005); // D2W*PADVW
+  ind.setQ(5,22,-0.000007); // D2W*PADVB
+  ind.setQ(5,23,-0.000019); // D2W*PSPRW
+  ind.setQ(5,24,-0.000022); // D2W*PSPRB
+  ind.setQ(5,26,0.000011); // D2W*T0
+  ind.setQ(6,17,-0.000008); // D2B*ETAW
+  ind.setQ(6,18,-0.000065); // D2B*ETAB
+  ind.setQ(6,19,-0.000033); // D2B*PW
+  ind.setQ(6,20,-0.000029); // D2B*PB
+  ind.setQ(6,21,-0.000005); // D2B*PADVW
+  ind.setQ(6,22,0.000007); // D2B*PADVB
+  ind.setQ(6,23,0.000019); // D2B*PSPRW
+  ind.setQ(6,24,0.000022); // D2B*PSPRB
+  ind.setQ(6,26,-0.000011); // D2B*T0
+  ind.setQ(7,17,0.000021); // Q11W*ETAW
+  ind.setQ(7,18,-0.000017); // Q11W*ETAB
+  ind.setQ(7,21,0.000001); // Q11W*PADVW
+  ind.setQ(7,22,0.000004); // Q11W*PADVB
+  ind.setQ(7,23,-0.000003); // Q11W*PSPRW
+  ind.setQ(7,24,0.000003); // Q11W*PSPRB
+  ind.setQ(7,26,0.000009); // Q11W*T0
+  ind.setQ(8,17,0.000023); // Q11B*ETAW
+  ind.setQ(8,18,-0.000026); // Q11B*ETAB
+  ind.setQ(8,19,0.000003); // Q11B*PW
+  ind.setQ(8,20,-0.000003); // Q11B*PB
+  ind.setQ(8,23,-0.000002); // Q11B*PSPRW
+  ind.setQ(8,24,-0.000003); // Q11B*PSPRB
+  ind.setQ(8,26,-0.000011); // Q11B*T0
+  ind.setQ(9,17,0.000035); // Q22W*ETAW
+  ind.setQ(9,18,-0.000027); // Q22W*ETAB
+  ind.setQ(9,21,-0.000007); // Q22W*PADVW
+  ind.setQ(9,22,0.000008); // Q22W*PADVB
+  ind.setQ(9,23,-0.000009); // Q22W*PSPRW
+  ind.setQ(9,26,0.000023); // Q22W*T0
+  ind.setQ(10,17,0.000029); // Q22B*ETAW
+  ind.setQ(10,18,-0.000028); // Q22B*ETAB
+  ind.setQ(10,20,0.000002); // Q22B*PB
+  ind.setQ(10,21,-0.000007); // Q22B*PADVW
+  ind.setQ(10,22,0.000008); // Q22B*PADVB
+  ind.setQ(10,23,-0.000004); // Q22B*PSPRW
+  ind.setQ(10,24,0.000006); // Q22B*PSPRB
+  ind.setQ(10,26,-0.000016); // Q22B*T0
+  ind.setQ(11,17,0.000009); // Q12W*ETAW
+  ind.setQ(11,18,0.000025); // Q12W*ETAB
+  ind.setQ(11,19,-0.000010); // Q12W*PW
+  ind.setQ(11,20,0.000006); // Q12W*PB
+  ind.setQ(11,21,0.000004); // Q12W*PADVW
+  ind.setQ(11,22,-0.000007); // Q12W*PADVB
+  ind.setQ(11,23,0.000004); // Q12W*PSPRW
+  ind.setQ(11,24,0.000008); // Q12W*PSPRB
+  ind.setQ(11,26,-0.000001); // Q12W*T0
+  ind.setQ(12,17,-0.000009); // Q12B*ETAW
+  ind.setQ(12,18,-0.000025); // Q12B*ETAB
+  ind.setQ(12,19,0.000010); // Q12B*PW
+  ind.setQ(12,20,-0.000006); // Q12B*PB
+  ind.setQ(12,21,-0.000004); // Q12B*PADVW
+  ind.setQ(12,22,0.000007); // Q12B*PADVB
+  ind.setQ(12,23,-0.000004); // Q12B*PSPRW
+  ind.setQ(12,24,-0.000008); // Q12B*PSPRB
+  ind.setQ(12,26,0.000001); // Q12B*T0
+  ind.setQ(13,17,0.000047); // AWK*ETAW
+  ind.setQ(13,18,-0.000150); // AWK*ETAB
+  ind.setQ(13,19,0.000015); // AWK*PW
+  ind.setQ(13,20,-0.000016); // AWK*PB
+  ind.setQ(13,21,-0.000008); // AWK*PADVW
+  ind.setQ(13,22,-0.000018); // AWK*PADVB
+  ind.setQ(13,23,-0.000020); // AWK*PSPRW
+  ind.setQ(13,24,-0.000010); // AWK*PSPRB
+  ind.setQ(13,26,-0.000014); // AWK*T0
+  ind.setQ(14,17,0.000046); // DWK*ETAW
+  ind.setQ(14,18,-0.000066); // DWK*ETAB
+  ind.setQ(14,19,-0.000003); // DWK*PW
+  ind.setQ(14,20,-0.000013); // DWK*PB
+  ind.setQ(14,21,-0.000002); // DWK*PADVW
+  ind.setQ(14,22,-0.000003); // DWK*PADVB
+  ind.setQ(14,23,-0.000009); // DWK*PSPRW
+  ind.setQ(14,24,-0.000003); // DWK*PSPRB
+  ind.setQ(14,26,0.000002); // DWK*T0
+  ind.setQ(15,17,0.000112); // ABK*ETAW
+  ind.setQ(15,18,-0.000045); // ABK*ETAB
+  ind.setQ(15,19,0.000009); // ABK*PW
+  ind.setQ(15,20,-0.000006); // ABK*PB
+  ind.setQ(15,21,0.000014); // ABK*PADVW
+  ind.setQ(15,22,0.000010); // ABK*PADVB
+  ind.setQ(15,23,0.000008); // ABK*PSPRW
+  ind.setQ(15,24,0.000017); // ABK*PSPRB
+  ind.setQ(15,26,0.000011); // ABK*T0
+  ind.setQ(16,17,0.000092); // DBK*ETAW
+  ind.setQ(16,18,-0.000074); // DBK*ETAB
+  ind.setQ(16,19,0.000018); // DBK*PW
+  ind.setQ(16,20,-0.000004); // DBK*PB
+  ind.setQ(16,21,0.000004); // DBK*PADVW
+  ind.setQ(16,22,-0.000004); // DBK*PADVB
+  ind.setQ(16,23,0.000007); // DBK*PSPRW
+  ind.setQ(16,24,0.000007); // DBK*PSPRB
+  ind.setQ(16,26,-0.000005); // DBK*T0
+  ind.setQ(17,17,0.056933); // ETAW*ETAW
+  ind.setQ(17,18,0.004714); // ETAW*ETAB
+  ind.setQ(17,19,0.010770); // ETAW*PW
+  ind.setQ(17,20,0.003902); // ETAW*PB
+  ind.setQ(17,21,0.009701); // ETAW*PADVW
+  ind.setQ(17,22,0.007780); // ETAW*PADVB
+  ind.setQ(17,23,0.012180); // ETAW*PSPRW
+  ind.setQ(17,24,0.009385); // ETAW*PSPRB
+  ind.setQ(17,26,0.004774); // ETAW*T0
+  ind.setQ(18,18,-0.056462); // ETAB*ETAB
+  ind.setQ(18,19,-0.000920); // ETAB*PW
+  ind.setQ(18,20,-0.010826); // ETAB*PB
+  ind.setQ(18,21,-0.006353); // ETAB*PADVW
+  ind.setQ(18,22,-0.013060); // ETAB*PADVB
+  ind.setQ(18,23,-0.006075); // ETAB*PSPRW
+  ind.setQ(18,24,-0.012016); // ETAB*PSPRB
+  ind.setQ(18,26,-0.004680); // ETAB*T0
+  ind.setQ(19,19,0.001353); // PW*PW
+  ind.setQ(19,20,0.000209); // PW*PB
+  ind.setQ(19,21,-0.000086); // PW*PADVW
+  ind.setQ(19,22,0.001775); // PW*PADVB
+  ind.setQ(19,23,0.001684); // PW*PSPRW
+  ind.setQ(19,24,0.000962); // PW*PSPRB
+  ind.setQ(19,26,0.001450); // PW*T0
+  ind.setQ(20,20,-0.002042); // PB*PB
+  ind.setQ(20,21,-0.001875); // PB*PADVW
+  ind.setQ(20,22,-0.001917); // PB*PADVB
+  ind.setQ(20,23,-0.000479); // PB*PSPRW
+  ind.setQ(20,24,-0.001961); // PB*PSPRB
+  ind.setQ(20,26,-0.001457); // PB*T0
+  ind.setQ(21,21,0.000930); // PADVW*PADVW
+  ind.setQ(21,22,0.000638); // PADVW*PADVB
+  ind.setQ(21,23,0.000386); // PADVW*PSPRW
+  ind.setQ(21,24,-0.000576); // PADVW*PSPRB
+  ind.setQ(21,26,0.000516); // PADVW*T0
+  ind.setQ(22,22,-0.000885); // PADVB*PADVB
+  ind.setQ(22,23,0.000994); // PADVB*PSPRW
+  ind.setQ(22,24,-0.000186); // PADVB*PSPRB
+  ind.setQ(22,26,-0.000457); // PADVB*T0
+  ind.setQ(23,23,-0.000478); // PSPRW*PSPRW
+  ind.setQ(23,24,-0.000131); // PSPRW*PSPRB
+  ind.setQ(23,26,0.000131); // PSPRW*T0
+  ind.setQ(24,24,-0.000268); // PSPRB*PSPRB
+  ind.setQ(24,26,-0.000226); // PSPRB*T0
+  ind.setQ(26,26,0.000003); // T0*T0
 
   return ind;
 }
+
+// ---- Compact array form ----
+// ind.wLin = new Float64Array([
+//   0.000482,-0.000583,0.006302,-0.000010,0.000010,-0.000091,0.000091,0.000022,-0.000018,
+//   0.000024,0.000006,0.000026,-0.000026,-0.000337,-0.000013,0.000227,-0.000044,0.194209,
+//   -0.187563,0.027884,-0.024796,0.019747,-0.022358,0.015105,-0.005249,0.000000,-0.000195
+// ]);
+// ind.wQuad = new Float64Array([
+//   0.000000,0.000000,0.000000,0.000000,-0.000000,-0.000001,0.000001,0.000000,0.000000,-0.000000,
+//   0.000000,-0.000000,0.000000,-0.000000,-0.000000,0.000000,0.000000,0.000285,-0.000135,0.000015,
+//   -0.000015,0.000012,0.000043,0.000006,0.000039,-0.000000,0.000078,-0.000001,-0.000003,-0.000000,
+//   0.000000,-0.000001,0.000001,0.000000,-0.000000,-0.000000,-0.000000,-0.000000,0.000000,-0.000000,
+//   -0.000000,0.000000,0.000000,0.000239,-0.000374,0.000035,-0.000039,-0.000016,-0.000012,-0.000023,
+//   -0.000023,0.000000,-0.000074,0.000021,0.000011,-0.000011,-0.000000,0.000000,0.000000,-0.000002,
+//   -0.000000,-0.000002,0.000001,-0.000001,0.000000,-0.000001,0.000002,-0.000000,0.001336,0.002204,
+//   -0.000442,-0.000235,0.000499,0.000529,0.000505,0.000494,-0.000000,0.000174,-0.000000,0.000000,
+//   -0.000001,0.000001,0.000000,-0.000000,0.000000,-0.000000,-0.000000,0.000000,-0.000000,0.000000,
+//   0.000000,-0.000000,-0.000028,0.000033,0.000003,0.000001,0.000008,-0.000016,0.000004,-0.000001,
+//   0.000000,-0.000001,-0.000000,0.000001,-0.000001,-0.000000,0.000000,-0.000000,0.000000,0.000000,
+//   -0.000000,0.000000,-0.000000,-0.000000,0.000000,0.000028,-0.000033,-0.000003,-0.000001,-0.000008,
+//   0.000016,-0.000004,0.000001,-0.000000,0.000001,-0.000000,0.000000,-0.000000,-0.000000,-0.000000,
+//   -0.000000,-0.000000,0.000000,-0.000000,0.000000,-0.000000,0.000000,0.000008,0.000065,0.000033,
+//   0.000029,0.000005,-0.000007,-0.000019,-0.000022,0.000000,0.000011,-0.000000,0.000000,0.000000,
+//   0.000000,0.000000,0.000000,-0.000000,0.000000,-0.000000,0.000000,-0.000000,-0.000008,-0.000065,
+//   -0.000033,-0.000029,-0.000005,0.000007,0.000019,0.000022,-0.000000,-0.000011,0.000000,0.000000,
+//   -0.000000,0.000000,-0.000000,0.000000,-0.000000,-0.000000,0.000000,0.000000,0.000021,-0.000017,
+//   0.000000,-0.000001,0.000001,0.000004,-0.000003,0.000003,-0.000000,0.000009,0.000000,0.000000,
+//   0.000000,0.000000,-0.000000,-0.000000,-0.000000,0.000000,0.000000,0.000023,-0.000026,0.000003,
+//   -0.000003,-0.000000,-0.000000,-0.000002,-0.000003,0.000000,-0.000011,0.000000,0.000000,-0.000000,
+//   0.000000,-0.000000,-0.000000,0.000000,0.000000,0.000035,-0.000027,-0.000001,-0.000000,-0.000007,
+//   0.000008,-0.000009,0.000001,-0.000000,0.000023,-0.000000,-0.000000,0.000000,-0.000000,-0.000000,
+//   0.000000,0.000000,0.000029,-0.000028,-0.000001,0.000002,-0.000007,0.000008,-0.000004,0.000006,
+//   0.000000,-0.000016,-0.000000,0.000000,0.000000,-0.000000,0.000000,0.000000,0.000009,0.000025,
+//   -0.000010,0.000006,0.000004,-0.000007,0.000004,0.000008,-0.000000,-0.000001,-0.000000,-0.000000,
+//   0.000000,-0.000000,-0.000000,-0.000009,-0.000025,0.000010,-0.000006,-0.000004,0.000007,-0.000004,
+//   -0.000008,0.000000,0.000001,-0.000000,-0.000000,0.000000,-0.000000,0.000047,-0.000150,0.000015,
+//   -0.000016,-0.000008,-0.000018,-0.000020,-0.000010,-0.000000,-0.000014,-0.000000,-0.000000,0.000000,
+//   0.000046,-0.000066,-0.000003,-0.000013,-0.000002,-0.000003,-0.000009,-0.000003,-0.000000,0.000002,
+//   0.000000,0.000000,0.000112,-0.000045,0.000009,-0.000006,0.000014,0.000010,0.000008,0.000017,
+//   0.000000,0.000011,0.000000,0.000092,-0.000074,0.000018,-0.000004,0.000004,-0.000004,0.000007,
+//   0.000007,0.000000,-0.000005,0.056933,0.004714,0.010770,0.003902,0.009701,0.007780,0.012180,
+//   0.009385,0.000000,0.004774,-0.056462,-0.000920,-0.010826,-0.006353,-0.013060,-0.006075,-0.012016,
+//   -0.000000,-0.004680,0.001353,0.000209,-0.000086,0.001775,0.001684,0.000962,-0.000000,0.001450,
+//   -0.002042,-0.001875,-0.001917,-0.000479,-0.001961,0.000000,-0.001457,0.000930,0.000638,0.000386,
+//   -0.000576,-0.000000,0.000516,-0.000885,0.000994,-0.000186,0.000000,-0.000457,-0.000478,-0.000131,
+//   -0.000000,0.000131,-0.000268,0.000000,-0.000226,0.000000,0.000000,0.000003
+// ]);
 
 // ---- Compact array form ----
 // ind.wLin = new Float64Array([

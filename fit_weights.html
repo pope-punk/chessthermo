@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Chess Thermodynamics - Weight Fitter</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0a0a;color:#e0e0e0;
+  display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:20px}
+h1{font-size:1.6em;margin-bottom:4px;color:#7fdbca}
+.subtitle{color:#888;margin-bottom:20px;font-size:0.9em}
+#drop-zone{width:700px;max-width:95vw;border:2px dashed #444;border-radius:12px;
+  padding:60px 20px;text-align:center;cursor:pointer;transition:all 0.3s;margin-bottom:20px}
+#drop-zone:hover,#drop-zone.dragover{border-color:#7fdbca;background:rgba(127,219,202,0.05)}
+#drop-zone.processing{border-color:#f0c040;cursor:wait}
+#drop-zone p{font-size:1.1em;color:#aaa}
+#drop-zone .big{font-size:1.5em;color:#7fdbca;margin-bottom:8px}
+.controls{display:flex;gap:16px;margin-bottom:20px;flex-wrap:wrap;justify-content:center}
+.controls label{font-size:0.85em;color:#aaa}
+.controls input{background:#1a1a2e;border:1px solid #333;color:#e0e0e0;
+  padding:4px 8px;border-radius:4px;width:100px}
+#progress-area{width:700px;max-width:95vw;display:none}
+#progress-bar-outer{background:#1a1a2e;border-radius:6px;height:24px;margin-bottom:8px;overflow:hidden}
+#progress-bar{background:linear-gradient(90deg,#7fdbca,#3fa89f);height:100%;width:0%;
+  transition:width 0.3s;border-radius:6px}
+#status{font-size:0.85em;color:#aaa;margin-bottom:12px;min-height:2.4em}
+#stats{display:none;width:700px;max-width:95vw;margin-bottom:16px}
+.stat-row{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #1a1a2e}
+.stat-label{color:#888}.stat-value{color:#7fdbca;font-family:monospace}
+#feature-table{display:none;width:700px;max-width:95vw;margin-bottom:16px}
+#feature-table h3{color:#7fdbca;margin-bottom:8px}
+#feature-table table{width:100%;border-collapse:collapse;font-size:0.85em}
+#feature-table th{text-align:left;color:#888;padding:3px 8px;border-bottom:1px solid #333}
+#feature-table td{padding:3px 8px;font-family:monospace}
+#feature-table tr:nth-child(even){background:#111}
+.bar-cell{position:relative;width:200px}
+.bar-pos{position:absolute;left:50%;top:2px;bottom:2px;background:rgba(127,219,202,0.4);border-radius:2px}
+.bar-neg{position:absolute;right:50%;top:2px;bottom:2px;background:rgba(240,100,100,0.4);border-radius:2px}
+#output-area{display:none;width:700px;max-width:95vw}
+#output-area h3{color:#7fdbca;margin-bottom:8px}
+#output-box{background:#111;border:1px solid #333;border-radius:6px;padding:12px;
+  font-family:'Fira Code',monospace;font-size:0.75em;white-space:pre-wrap;
+  max-height:400px;overflow-y:auto;line-height:1.4}
+.copy-btn{background:#7fdbca;color:#0a0a0a;border:none;padding:8px 20px;border-radius:6px;
+  cursor:pointer;font-weight:bold;margin-top:8px;font-size:0.9em}
+.copy-btn:hover{background:#5fc0aa}
+input[type=file]{display:none}
+</style>
+</head>
+<body>
+<h1>Chess Thermodynamics Weight Fitter</h1>
+<p class="subtitle">Fit the equation of state from a PGN database (Texel-style logistic regression)</p>
+
+<div id="drop-zone" onclick="document.getElementById('file-input').click()">
+  <p class="big">Drop PGN file here</p>
+  <p>or click to browse. Lichess Elite Database recommended.</p>
+</div>
+<input type="file" id="file-input" accept=".pgn">
+
+<div class="controls">
+  <div><label>Max games</label><br><input id="max-games" type="number" value="50000" min="100" max="500000"></div>
+  <div><label>Sample every N ply</label><br><input id="sample-every" type="number" value="8" min="1" max="32"></div>
+  <div><label>Skip opening ply</label><br><input id="skip-opening" type="number" value="10" min="0" max="40"></div>
+  <div><label>Learning rate</label><br><input id="lr" type="number" value="0.01" step="0.001" min="0.001" max="0.1"></div>
+  <div><label>Epochs</label><br><input id="epochs" type="number" value="200" min="10" max="2000"></div>
+</div>
+
+<div id="progress-area">
+  <div id="progress-bar-outer"><div id="progress-bar"></div></div>
+  <div id="status">Ready</div>
+</div>
+
+<div id="stats"></div>
+
+<div id="feature-table">
+  <h3>Linear Feature Weights (ranked by |weight|)</h3>
+  <table><thead><tr><th>#</th><th>Feature</th><th>Weight</th><th>Magnitude</th></tr></thead>
+  <tbody id="feat-tbody"></tbody></table>
+</div>
+
+<div id="output-area">
+  <h3>Paste this into chess_thermodynamics.html (replace createSeeded)</h3>
+  <div id="output-box"></div>
+  <button class="copy-btn" onclick="copyOutput()">Copy to Clipboard</button>
+</div>
+
+<!-- ================================================================
+     WORKER CODE (runs in background thread)
+     ================================================================ -->
+<script id="worker-src" type="text/worker">
+const EMPTY=0,PAWN=1,KNIGHT=2,BISHOP=3,ROOK=4,QUEEN=5,KING=6;
+const WHITE=1,BLACK=-1;
+const CWK=1,CWQ=2,CBK=4,CBQ=8;
+const GREEN=new Float64Array(4096);
+for(let a=0;a<64;a++)for(let b=0;b<64;b++)
+  GREEN[a*64+b]=1/(1+Math.max(Math.abs((a&7)-(b&7)),Math.abs((a>>3)-(b>>3))));
+
+const NF=27,NQ=NF*(NF+1)/2,NTOTAL=NF+NQ;
+const FEAT_NAMES=["SW","SB","DS","D1W","D1B","D2W","D2B",
+  "Q11W","Q11B","Q22W","Q22B","Q12W","Q12B",
+  "AWK","DWK","ABK","DBK","ETAW","ETAB",
+  "PW","PB","PADVW","PADVB","PSPRW","PSPRB","TAU","T0"];
+
+const KNIGHT_DR=[-2,-2,-1,-1,1,1,2,2],KNIGHT_DF=[-1,1,-2,2,-2,2,-1,1];
+const SLIDE_DIRS=[[0,1],[0,-1],[1,0],[-1,0],[1,1],[1,-1],[-1,1],[-1,-1]];
+const FILES='abcdefgh';
+
+class Position{
+  constructor(){
+    this.board=new Int8Array(64);this.turn=WHITE;this.castling=15;
+    this.ep=-1;this.halfmove=0;this.fullmove=1;this.hist=[];
+  }
+  reset(){
+    this.board.fill(0);
+    const back=[ROOK,KNIGHT,BISHOP,QUEEN,KING,BISHOP,KNIGHT,ROOK];
+    for(let f=0;f<8;f++){
+      this.board[f]=back[f];this.board[8+f]=PAWN;
+      this.board[48+f]=-PAWN;this.board[56+f]=-back[f];
+    }
+    this.turn=WHITE;this.castling=15;this.ep=-1;this.halfmove=0;this.fullmove=1;this.hist=[];
+  }
+  makeMove(m){
+    const b=this.board,pc=b[m.from],cap=m.ep?b[m.epCap]:b[m.to];
+    this.hist.push({from:m.from,to:m.to,pc,cap,epCap:m.epCap||0,promo:m.promo||0,
+      castle:m.castle||0,prevC:this.castling,prevEp:this.ep,prevHM:this.halfmove});
+    b[m.to]=pc;b[m.from]=0;
+    if(m.ep)b[m.epCap]=0;
+    if(m.promo)b[m.to]=m.promo*this.turn;
+    if(m.castle){
+      if(m.castle===1){b[m.from+3]=0;b[m.from+1]=ROOK*this.turn;}
+      else{b[m.from-4]=0;b[m.from-1]=ROOK*this.turn;}
+    }
+    const abspc=Math.abs(pc);
+    if(abspc===KING){
+      if(this.turn===WHITE)this.castling&=~(CWK|CWQ);
+      else this.castling&=~(CBK|CBQ);
+    }
+    if(abspc===ROOK){
+      if(m.from===0)this.castling&=~CWQ;if(m.from===7)this.castling&=~CWK;
+      if(m.from===56)this.castling&=~CBQ;if(m.from===63)this.castling&=~CBK;
+    }
+    if(cap){
+      if(m.to===0||m.epCap===0)this.castling&=~CWQ;
+      if(m.to===7||m.epCap===7)this.castling&=~CWK;
+      if(m.to===56||m.epCap===56)this.castling&=~CBQ;
+      if(m.to===63||m.epCap===63)this.castling&=~CBK;
+    }
+    this.ep=(abspc===PAWN&&Math.abs(m.to-m.from)===16)?(m.from+m.to)/2:-1;
+    this.halfmove=(abspc===PAWN||cap)?0:this.halfmove+1;
+    if(this.turn===BLACK)this.fullmove++;
+    this.turn=-this.turn;
+  }
+  unmakeMove(){
+    const h=this.hist.pop();this.turn=-this.turn;
+    if(this.turn===BLACK)this.fullmove--;
+    this.board[h.from]=h.pc;this.board[h.to]=h.cap||0;
+    if(h.promo)this.board[h.to]=h.cap||0;
+    if(h.epCap&&h.cap){this.board[h.to]=0;this.board[h.epCap]=h.cap;}
+    if(h.castle){
+      if(h.castle===1){this.board[h.from+1]=0;this.board[h.from+3]=ROOK*this.turn;}
+      else{this.board[h.from-1]=0;this.board[h.from-4]=ROOK*this.turn;}
+    }
+    this.castling=h.prevC;this.ep=h.prevEp;this.halfmove=h.prevHM;
+  }
+  isAttacked(sq,byColor){
+    const b=this.board,r=sq>>3,f=sq&7;
+    for(let i=0;i<8;i++){
+      const nr=r+KNIGHT_DR[i],nf=f+KNIGHT_DF[i];
+      if(nr>=0&&nr<8&&nf>=0&&nf<8&&b[nr*8+nf]===KNIGHT*byColor)return true;
+    }
+    for(let dr=-1;dr<=1;dr++)for(let df=-1;df<=1;df++){
+      if(!dr&&!df)continue;
+      const nr=r+dr,nf=f+df;
+      if(nr>=0&&nr<8&&nf>=0&&nf<8&&b[nr*8+nf]===KING*byColor)return true;
+    }
+    const pr=r-byColor;
+    if(pr>=0&&pr<8){
+      if(f>0&&b[pr*8+f-1]===PAWN*byColor)return true;
+      if(f<7&&b[pr*8+f+1]===PAWN*byColor)return true;
+    }
+    for(let d=0;d<8;d++){
+      const dr=SLIDE_DIRS[d][0],df=SLIDE_DIRS[d][1],isDiag=dr&&df;
+      let cr=r+dr,cf=f+df;
+      while(cr>=0&&cr<8&&cf>=0&&cf<8){
+        const pc=b[cr*8+cf];
+        if(pc){
+          const apc=Math.abs(pc);
+          if(Math.sign(pc)===byColor){
+            if(apc===QUEEN)return true;
+            if(isDiag&&apc===BISHOP)return true;
+            if(!isDiag&&apc===ROOK)return true;
+          }
+          break;
+        }
+        cr+=dr;cf+=df;
+      }
+    }
+    return false;
+  }
+  inCheck(color){
+    const kc=color||this.turn;
+    for(let i=0;i<64;i++)if(this.board[i]===KING*kc)return this.isAttacked(i,-kc);
+    return false;
+  }
+  genPseudoMoves(){
+    const b=this.board,t=this.turn,moves=[];
+    for(let sq=0;sq<64;sq++){
+      if(!b[sq]||Math.sign(b[sq])!==t)continue;
+      const pc=Math.abs(b[sq]),r=sq>>3,f=sq&7;
+      if(pc===PAWN){
+        const dir=t,sr=t===WHITE?1:6,pr=t===WHITE?7:0;
+        for(const df of[-1,1]){
+          const nf=f+df,nr=r+dir;
+          if(nf<0||nf>7||nr<0||nr>7)continue;
+          const to=nr*8+nf;
+          if(b[to]&&Math.sign(b[to])===-t){
+            if(nr===pr){for(const pp of[QUEEN,ROOK,BISHOP,KNIGHT])moves.push({from:sq,to,promo:pp});}
+            else moves.push({from:sq,to});
+          }
+          if(to===this.ep)moves.push({from:sq,to,ep:true,epCap:r*8+nf});
+        }
+        const fwd=sq+dir*8;
+        if(fwd>=0&&fwd<64&&!b[fwd]){
+          if((fwd>>3)===pr){for(const pp of[QUEEN,ROOK,BISHOP,KNIGHT])moves.push({from:sq,to:fwd,promo:pp});}
+          else{
+            moves.push({from:sq,to:fwd});
+            if(r===sr){const fwd2=sq+dir*16;if(!b[fwd2])moves.push({from:sq,to:fwd2});}
+          }
+        }
+      }else if(pc===KNIGHT){
+        for(let i=0;i<8;i++){
+          const nr=r+KNIGHT_DR[i],nf=f+KNIGHT_DF[i];
+          if(nr<0||nr>7||nf<0||nf>7)continue;
+          if(Math.sign(b[nr*8+nf])===t)continue;
+          moves.push({from:sq,to:nr*8+nf});
+        }
+      }else if(pc===KING){
+        for(let dr=-1;dr<=1;dr++)for(let df=-1;df<=1;df++){
+          if(!dr&&!df)continue;
+          const nr=r+dr,nf=f+df;
+          if(nr<0||nr>7||nf<0||nf>7)continue;
+          if(Math.sign(b[nr*8+nf])===t)continue;
+          moves.push({from:sq,to:nr*8+nf});
+        }
+        const ksq=t===WHITE?4:60;
+        if(sq===ksq&&!this.isAttacked(sq,-t)){
+          if((this.castling&(t===WHITE?CWK:CBK))&&!b[ksq+1]&&!b[ksq+2]&&b[ksq+3]===ROOK*t
+            &&!this.isAttacked(ksq+1,-t)&&!this.isAttacked(ksq+2,-t))
+            moves.push({from:sq,to:ksq+2,castle:1});
+          if((this.castling&(t===WHITE?CWQ:CBQ))&&!b[ksq-1]&&!b[ksq-2]&&!b[ksq-3]&&b[ksq-4]===ROOK*t
+            &&!this.isAttacked(ksq-1,-t)&&!this.isAttacked(ksq-2,-t))
+            moves.push({from:sq,to:ksq-2,castle:-1});
+        }
+      }else{
+        const dirs=pc===BISHOP?[4,5,6,7]:pc===ROOK?[0,1,2,3]:[0,1,2,3,4,5,6,7];
+        for(const d of dirs){
+          let cr=r+SLIDE_DIRS[d][0],cf=f+SLIDE_DIRS[d][1];
+          while(cr>=0&&cr<8&&cf>=0&&cf<8){
+            const to=cr*8+cf,tp=b[to];
+            if(tp&&Math.sign(tp)===t)break;
+            moves.push({from:sq,to});
+            if(tp)break;
+            cr+=SLIDE_DIRS[d][0];cf+=SLIDE_DIRS[d][1];
+          }
+        }
+      }
+    }
+    return moves;
+  }
+  legalMoves(){
+    return this.genPseudoMoves().filter(m=>{
+      this.makeMove(m);
+      const ok=!this.inCheck(-this.turn);
+      this.unmakeMove();
+      return ok;
+    });
+  }
+}
+
+// Mobility & features
+function pieceMobility(board,sq,ep){
+  const pc=Math.abs(board[sq]),color=Math.sign(board[sq]),r=sq>>3,f=sq&7;
+  let cnt=0;
+  if(pc===PAWN){
+    const dir=color,sr=color===WHITE?1:6;
+    for(const df of[-1,1]){
+      const nf=f+df,nr=r+dir;
+      if(nf>=0&&nf<8&&nr>=0&&nr<8){
+        const to=nr*8+nf;
+        if((board[to]&&Math.sign(board[to])===-color)||to===ep)cnt++;
+      }
+    }
+    const fwd=sq+dir*8;
+    if(fwd>=0&&fwd<64&&!board[fwd]){cnt++;if(r===sr){const f2=sq+dir*16;if(!board[f2])cnt++;}}
+  }else if(pc===KNIGHT){
+    for(let i=0;i<8;i++){
+      const nr=r+KNIGHT_DR[i],nf=f+KNIGHT_DF[i];
+      if(nr>=0&&nr<8&&nf>=0&&nf<8&&Math.sign(board[nr*8+nf])!==color)cnt++;
+    }
+  }else if(pc===KING){
+    for(let dr=-1;dr<=1;dr++)for(let df=-1;df<=1;df++){
+      if(!dr&&!df)continue;
+      const nr=r+dr,nf=f+df;
+      if(nr>=0&&nr<8&&nf>=0&&nf<8&&Math.sign(board[nr*8+nf])!==color)cnt++;
+    }
+  }else{
+    const dirs=pc===BISHOP?[4,5,6,7]:pc===ROOK?[0,1,2,3]:[0,1,2,3,4,5,6,7];
+    for(const d of dirs){
+      let cr=r+SLIDE_DIRS[d][0],cf=f+SLIDE_DIRS[d][1];
+      while(cr>=0&&cr<8&&cf>=0&&cf<8){
+        const tp=board[cr*8+cf];
+        if(tp&&Math.sign(tp)===color)break;cnt++;
+        if(tp)break;cr+=SLIDE_DIRS[d][0];cf+=SLIDE_DIRS[d][1];
+      }
+    }
+  }
+  return cnt;
+}
+
+function computeFeatures(pos){
+  const b=pos.board,feat=new Float64Array(NF);
+  const srcW=new Float64Array(64),srcB=new Float64Array(64);
+  let wkSq=-1,bkSq=-1,nPawns=0,nThermal=0;
+  let pcW=0,pcB=0,paW=0,paB=0;
+  const pfW=[],pfB=[];
+
+  for(let sq=0;sq<64;sq++){
+    if(!b[sq])continue;
+    const apc=Math.abs(b[sq]),color=Math.sign(b[sq]);
+    if(apc===KING){if(color===WHITE)wkSq=sq;else bkSq=sq;}
+    const mob=pieceMobility(b,sq,pos.ep);
+    const q=Math.log(1+mob);
+    let w=1.0;
+    if(apc===PAWN){w=0.5;nPawns++;
+      if(color===WHITE){pcW++;paW+=(sq>>3)-1;pfW.push(sq&7);}
+      else{pcB++;paB+=6-(sq>>3);pfB.push(sq&7);}
+    }else if(apc===KING){w=0.3;}
+    else{nThermal++;}
+    if(color===WHITE)srcW[sq]=q*w;else srcB[sq]=q*w;
+  }
+
+  const rhoW=new Float64Array(64),rhoB=new Float64Array(64);
+  for(let x=0;x<64;x++){
+    let fw=0,fb=0;
+    for(let s=0;s<64;s++){
+      if(srcW[s]>0||srcB[s]>0){const g=GREEN[x*64+s];fw+=srcW[s]*g;fb+=srcB[s]*g;}
+    }
+    rhoW[x]=fw;rhoB[x]=fb;
+  }
+
+  let Sw=0,Sb=0;
+  for(let sq=0;sq<64;sq++){Sw+=srcW[sq];Sb+=srcB[sq];}
+  feat[0]=Sw;feat[1]=Sb;feat[2]=Sw-Sb;
+
+  feat[26]=nThermal>0?(62-nPawns)/nThermal:99;
+
+  let totalAbs=0,cx=0,cy=0;
+  for(let sq=0;sq<64;sq++){
+    const a=srcW[sq]+srcB[sq];
+    if(a>0){cx+=a*(sq&7);cy+=a*(sq>>3);totalAbs+=a;}
+  }
+  if(totalAbs<1e-12)totalAbs=1;
+  cx/=totalAbs;cy/=totalAbs;
+
+  let I11=0,I12=0,I22=0;
+  for(let sq=0;sq<64;sq++){
+    const a=srcW[sq]+srcB[sq];if(a<=0)continue;
+    const dx=(sq&7)-cx,dy=(sq>>3)-cy;
+    I11+=a*dx*dx;I12+=a*dx*dy;I22+=a*dy*dy;
+  }
+
+  const tr=I11+I22,det=I11*I22-I12*I12;
+  const disc=Math.sqrt(Math.max(0,tr*tr-4*det));
+  const lam1=(tr+disc)/2;
+  let e1x,e1y,e2x,e2y;
+  if(Math.abs(I12)>1e-12){
+    e1x=lam1-I22;e1y=I12;
+    const n1=Math.sqrt(e1x*e1x+e1y*e1y);
+    if(n1>1e-12){e1x/=n1;e1y/=n1;}else{e1x=1;e1y=0;}
+    e2x=-e1y;e2y=e1x;
+  }else{e1x=1;e1y=0;e2x=0;e2y=1;}
+  if(e1y<0){e1x=-e1x;e1y=-e1y;e2x=-e2x;e2y=-e2y;}
+
+  let d1w=0,d1b=0,d2w=0,d2b=0;
+  let q11w=0,q11b=0,q22w=0,q22b=0,q12w=0,q12b=0;
+  for(let sq=0;sq<64;sq++){
+    const sw=srcW[sq],sb=srcB[sq];
+    if(sw<=0&&sb<=0)continue;
+    const dx=(sq&7)-cx,dy=(sq>>3)-cy;
+    const u1=dx*e1x+dy*e1y,u2=dx*e2x+dy*e2y;
+    if(sw>0){d1w+=sw*u1;d2w+=sw*u2;q11w+=sw*u1*u1;q22w+=sw*u2*u2;q12w+=sw*u1*u2;}
+    if(sb>0){d1b+=sb*u1;d2b+=sb*u2;q11b+=sb*u1*u1;q22b+=sb*u2*u2;q12b+=sb*u1*u2;}
+  }
+  feat[3]=d1w;feat[4]=d1b;feat[5]=d2w;feat[6]=d2b;
+  feat[7]=q11w;feat[8]=q11b;feat[9]=q22w;feat[10]=q22b;feat[11]=q12w;feat[12]=q12b;
+
+  if(wkSq>=0&&bkSq>=0){
+    let awk=0,dwk=0,abk=0,dbk=0;
+    for(let sq=0;sq<64;sq++){
+      const kw=GREEN[sq*64+wkSq],kb=GREEN[sq*64+bkSq];
+      awk+=rhoB[sq]*kw;dwk+=rhoW[sq]*kw;abk+=rhoW[sq]*kb;dbk+=rhoB[sq]*kb;
+    }
+    feat[13]=awk;feat[14]=dwk;feat[15]=abk;feat[16]=dbk;
+  }
+
+  if(Sw>1e-12){let eta=0;for(let sq=0;sq<64;sq++){if(srcW[sq]>0){const p=srcW[sq]/Sw;eta-=p*Math.log(p);}}feat[17]=eta;}
+  if(Sb>1e-12){let eta=0;for(let sq=0;sq<64;sq++){if(srcB[sq]>0){const p=srcB[sq]/Sb;eta-=p*Math.log(p);}}feat[18]=eta;}
+
+  feat[19]=pcW;feat[20]=pcB;feat[21]=paW;feat[22]=paB;
+  if(pfW.length>1){const m=pfW.reduce((a,b)=>a+b,0)/pfW.length;feat[23]=pfW.reduce((a,b)=>a+(b-m)*(b-m),0)/pfW.length;}
+  if(pfB.length>1){const m=pfB.reduce((a,b)=>a+b,0)/pfB.length;feat[24]=pfB.reduce((a,b)=>a+(b-m)*(b-m),0)/pfB.length;}
+
+  let tau=0;for(let x=0;x<64;x++)tau+=rhoW[x]*rhoB[x];
+  feat[25]=tau;
+  return feat;
+}
+
+function expandQuad(feat){
+  const out=new Float64Array(NTOTAL);out.set(feat);
+  let idx=NF;
+  for(let i=0;i<NF;i++)for(let j=i;j<NF;j++)out[idx++]=feat[i]*feat[j];
+  return out;
+}
+
+// PGN SAN parser
+const PROMO_MAP={'q':QUEEN,'r':ROOK,'b':BISHOP,'n':KNIGHT,'Q':QUEEN,'R':ROOK,'B':BISHOP,'N':KNIGHT};
+const PIECE_FROM_LETTER={'N':KNIGHT,'B':BISHOP,'R':ROOK,'Q':QUEEN,'K':KING};
+
+function parseSAN(pos,san){
+  if(san==='O-O'||san==='0-0'){
+    const ksq=pos.turn===WHITE?4:60;
+    return pos.legalMoves().find(m=>m.from===ksq&&m.castle===1)||null;
+  }
+  if(san==='O-O-O'||san==='0-0-0'){
+    const ksq=pos.turn===WHITE?4:60;
+    return pos.legalMoves().find(m=>m.from===ksq&&m.castle===-1)||null;
+  }
+  let s=san.replace(/[+#!?=]/g,'');
+  let promo=0;
+  if(s.length>=2){const last=s[s.length-1];if(PROMO_MAP[last]){promo=PROMO_MAP[last];s=s.slice(0,-1);}}
+  let pieceType=PAWN;
+  if(s.length>0&&PIECE_FROM_LETTER[s[0]]){pieceType=PIECE_FROM_LETTER[s[0]];s=s.slice(1);}
+  s=s.replace('x','');
+  const toFile=FILES.indexOf(s[s.length-2]),toRank=parseInt(s[s.length-1])-1;
+  if(toFile<0||toRank<0||toRank>7)return null;
+  const toSq=toRank*8+toFile;
+  let disambigFile=-1,disambigRank=-1;
+  for(const c of s.slice(0,-2)){
+    if(c>='a'&&c<='h')disambigFile=FILES.indexOf(c);
+    else if(c>='1'&&c<='8')disambigRank=parseInt(c)-1;
+  }
+  const candidates=pos.legalMoves().filter(m=>{
+    if(m.to!==toSq)return false;
+    if(Math.abs(pos.board[m.from])!==pieceType)return false;
+    if(promo&&m.promo!==promo)return false;
+    if(!promo&&m.promo)return false;
+    if(disambigFile>=0&&(m.from&7)!==disambigFile)return false;
+    if(disambigRank>=0&&(m.from>>3)!==disambigRank)return false;
+    return true;
+  });
+  return candidates.length===1?candidates[0]:null;
+}
+
+// Sigmoid
+function sigmoid(x){return x>20?1:x<-20?0:1/(1+Math.exp(-x));}
+
+// Main worker message handler
+self.onmessage=function(e){
+  const{text,maxGames,sampleEvery,skipOpening,lr,epochs}=e.data;
+
+  // Phase 1: Parse PGN and extract features
+  const X=[],Y=[];
+  let gameCount=0,wins=0,draws=0,losses=0,parseErrors=0;
+  const lines=text.split('\n');
+  let headers={},moveText='',inGame=false;
+
+  function processGame(){
+    if(!moveText.trim())return;
+    const result=headers['Result'];
+    let label;
+    if(result==='1-0'){label=1.0;wins++;}
+    else if(result==='0-1'){label=0.0;losses++;}
+    else if(result==='1/2-1/2'){label=0.5;draws++;}
+    else return;
+    gameCount++;
+
+    const tokens=moveText.replace(/\{[^}]*\}/g,' ')
+      .replace(/\([^)]*\)/g,' ')
+      .replace(/\d+\.+/g,' ')
+      .replace(/\s+/g,' ').trim().split(' ')
+      .filter(t=>t&&t!=='1-0'&&t!=='0-1'&&t!=='1/2-1/2'&&t!=='*');
+
+    const pos=new Position();pos.reset();
+    let ply=0;
+    for(const token of tokens){
+      const move=parseSAN(pos,token);
+      if(!move){parseErrors++;return;}
+      pos.makeMove(move);
+      ply++;
+      if(ply<=skipOpening)continue;
+      if(ply%sampleEvery!==0)continue;
+      X.push(expandQuad(computeFeatures(pos)));
+      Y.push(label);
+    }
+  }
+
+  for(let i=0;i<lines.length;i++){
+    const line=lines[i].trim();
+    if(line.startsWith('[')){
+      if(inGame&&moveText.trim()){processGame();if(gameCount>=maxGames)break;}
+      if(line.startsWith('[Event ')){headers={};moveText='';inGame=true;}
+      const hm=line.match(/\[(\w+)\s+"(.*)"\]/);
+      if(hm)headers[hm[1]]=hm[2];
+    }else if(line){moveText+=line+' ';}
+
+    if(i%5000===0)self.postMessage({type:'progress',phase:'parse',pct:i/lines.length,
+      games:gameCount,positions:X.length});
+  }
+  if(inGame&&moveText.trim()&&gameCount<maxGames)processGame();
+
+  self.postMessage({type:'parsed',gameCount,wins,draws,losses,parseErrors,positions:X.length});
+
+  if(X.length<100){self.postMessage({type:'error',msg:'Too few positions ('+X.length+')'});return;}
+
+  // Phase 2: Normalize features
+  const n=X.length,d=NTOTAL;
+  const mean=new Float64Array(d),std=new Float64Array(d);
+  for(let j=0;j<d;j++){let s=0;for(let i=0;i<n;i++)s+=X[i][j];mean[j]=s/n;}
+  for(let j=0;j<d;j++){let s=0;for(let i=0;i<n;i++){const v=X[i][j]-mean[j];s+=v*v;}std[j]=Math.sqrt(s/n);if(std[j]<1e-12)std[j]=1;}
+  for(let i=0;i<n;i++)for(let j=0;j<d;j++)X[i][j]=(X[i][j]-mean[j])/std[j];
+
+  // Phase 3: Adam optimizer
+  const w=new Float64Array(d);
+  const m=new Float64Array(d),v=new Float64Array(d);
+  const b1=0.9,b2=0.999,eps=1e-8;
+  const grad=new Float64Array(d);
+  let bestLoss=Infinity;
+  const bestW=new Float64Array(d);
+
+  for(let epoch=0;epoch<epochs;epoch++){
+    let loss=0;grad.fill(0);
+    for(let i=0;i<n;i++){
+      let dot=0;for(let j=0;j<d;j++)dot+=w[j]*X[i][j];
+      const p=sigmoid(dot),err=p-Y[i];
+      loss+=-Y[i]*Math.log(p+1e-15)-(1-Y[i])*Math.log(1-p+1e-15);
+      for(let j=0;j<d;j++)grad[j]+=err*X[i][j];
+    }
+    loss/=n;
+    let l2=0;for(let j=0;j<d;j++){l2+=w[j]*w[j];grad[j]=grad[j]/n+0.01*w[j];}
+    loss+=0.005*l2;
+    if(loss<bestLoss){bestLoss=loss;bestW.set(w);}
+
+    const t=epoch+1;
+    for(let j=0;j<d;j++){
+      m[j]=b1*m[j]+(1-b1)*grad[j];
+      v[j]=b2*v[j]+(1-b2)*grad[j]*grad[j];
+      const mh=m[j]/(1-Math.pow(b1,t)),vh=v[j]/(1-Math.pow(b2,t));
+      w[j]-=lr*mh/(Math.sqrt(vh)+eps);
+    }
+
+    if(epoch%5===0)self.postMessage({type:'progress',phase:'fit',pct:epoch/epochs,loss,epoch});
+  }
+
+  // Rescale to original space
+  const wOrig=new Float64Array(d);
+  for(let j=0;j<d;j++)wOrig[j]=bestW[j]/std[j];
+
+  self.postMessage({type:'done',weights:Array.from(wOrig),loss:bestLoss});
+};
+</script>
+
+<!-- ================================================================
+     MAIN THREAD (UI only)
+     ================================================================ -->
+<script>
+const NF=27,NQ=NF*(NF+1)/2;
+const FEAT_NAMES=["SW","SB","DS","D1W","D1B","D2W","D2B",
+  "Q11W","Q11B","Q22W","Q22B","Q12W","Q12B",
+  "AWK","DWK","ABK","DBK","ETAW","ETAB",
+  "PW","PB","PADVW","PADVB","PSPRW","PSPRB","TAU","T0"];
+
+const dropZone=document.getElementById('drop-zone');
+const fileInput=document.getElementById('file-input');
+const progressArea=document.getElementById('progress-area');
+const progressBar=document.getElementById('progress-bar');
+const statusEl=document.getElementById('status');
+const statsEl=document.getElementById('stats');
+const featTable=document.getElementById('feature-table');
+const outputArea=document.getElementById('output-area');
+const outputBox=document.getElementById('output-box');
+
+dropZone.addEventListener('dragover',e=>{e.preventDefault();dropZone.classList.add('dragover');});
+dropZone.addEventListener('dragleave',()=>dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop',e=>{
+  e.preventDefault();dropZone.classList.remove('dragover');
+  if(e.dataTransfer.files.length)handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change',e=>{if(e.target.files.length)handleFile(e.target.files[0]);});
+
+let worker=null;
+let t0;
+
+function handleFile(file){
+  dropZone.classList.add('processing');
+  progressArea.style.display='block';
+  statsEl.style.display='none';
+  featTable.style.display='none';
+  outputArea.style.display='none';
+  statusEl.textContent='Reading file...';
+  progressBar.style.width='0%';
+
+  const reader=new FileReader();
+  reader.onload=function(e){
+    const text=e.target.result;
+    statusEl.textContent=`Read ${(text.length/1e6).toFixed(1)} MB. Starting worker...`;
+
+    // Create worker from inline script
+    const src=document.getElementById('worker-src').textContent;
+    const blob=new Blob([src],{type:'application/javascript'});
+    if(worker)worker.terminate();
+    worker=new Worker(URL.createObjectURL(blob));
+    t0=performance.now();
+
+    worker.onmessage=function(msg){
+      const d=msg.data;
+      if(d.type==='progress'){
+        if(d.phase==='parse'){
+          progressBar.style.width=(d.pct*50)+'%';
+          statusEl.textContent=`Parsing: ${d.games} games, ${d.positions} positions...`;
+        }else{
+          progressBar.style.width=(50+d.pct*50)+'%';
+          statusEl.textContent=`Fitting: epoch ${d.epoch}, loss=${d.loss.toFixed(6)}`;
+        }
+      }else if(d.type==='parsed'){
+        const elapsed=((performance.now()-t0)/1000).toFixed(1);
+        statsEl.style.display='block';
+        statsEl.innerHTML=`
+          <div class="stat-row"><span class="stat-label">Games processed</span><span class="stat-value">${d.gameCount}</span></div>
+          <div class="stat-row"><span class="stat-label">Positions sampled</span><span class="stat-value">${d.positions}</span></div>
+          <div class="stat-row"><span class="stat-label">White wins / Draws / Black wins</span><span class="stat-value">${d.wins} / ${d.draws} / ${d.losses}</span></div>
+          <div class="stat-row"><span class="stat-label">Parse errors (skipped)</span><span class="stat-value">${d.parseErrors}</span></div>
+          <div class="stat-row"><span class="stat-label">Parse time</span><span class="stat-value">${elapsed}s</span></div>`;
+      }else if(d.type==='error'){
+        statusEl.textContent='Error: '+d.msg;
+        dropZone.classList.remove('processing');
+      }else if(d.type==='done'){
+        const elapsed=((performance.now()-t0)/1000).toFixed(1);
+        statsEl.innerHTML+=`
+          <div class="stat-row"><span class="stat-label">Final loss</span><span class="stat-value">${d.loss.toFixed(6)}</span></div>
+          <div class="stat-row"><span class="stat-label">Total time</span><span class="stat-value">${elapsed}s</span></div>`;
+        showResults(d.weights);
+        progressBar.style.width='100%';
+        statusEl.textContent='Done! Copy the output below into chess_thermodynamics.html';
+        dropZone.classList.remove('processing');
+        worker.terminate();worker=null;
+      }
+    };
+
+    worker.postMessage({
+      text,
+      maxGames:parseInt(document.getElementById('max-games').value)||50000,
+      sampleEvery:parseInt(document.getElementById('sample-every').value)||8,
+      skipOpening:parseInt(document.getElementById('skip-opening').value)||10,
+      lr:parseFloat(document.getElementById('lr').value)||0.01,
+      epochs:parseInt(document.getElementById('epochs').value)||200,
+    });
+  };
+  reader.readAsText(file);
+}
+
+function showResults(weights){
+  const lin=weights.slice(0,NF);
+  const ranked=[...Array(NF).keys()].sort((a,b)=>Math.abs(lin[b])-Math.abs(lin[a]));
+  const maxAbs=Math.abs(lin[ranked[0]])||1;
+
+  featTable.style.display='block';
+  const tbody=document.getElementById('feat-tbody');
+  tbody.innerHTML='';
+  for(let r=0;r<NF;r++){
+    const i=ranked[r];
+    const pct=lin[i]/maxAbs*50;
+    const barHtml=lin[i]>=0
+      ?`<div class="bar-pos" style="width:${Math.abs(pct)}%"></div>`
+      :`<div class="bar-neg" style="width:${Math.abs(pct)}%"></div>`;
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${r+1}</td><td>${FEAT_NAMES[i]}</td><td>${lin[i]>=0?'+':''}${lin[i].toFixed(6)}</td><td class="bar-cell">${barHtml}</td>`;
+    tbody.appendChild(tr);
+  }
+
+  outputArea.style.display='block';
+  outputBox.textContent=generateJS(weights);
+}
+
+function generateJS(weights){
+  const lin=weights.slice(0,NF);
+  let out='function createSeeded(){\n  const ind=new Individual();\n  ind.wPawn=0.5;ind.wKing=0.3;\n\n';
+  out+='  // Linear weights (fitted from PGN database)\n';
+  for(let i=0;i<NF;i++){
+    if(Math.abs(lin[i])>1e-8)
+      out+=`  ind.wLin[${i}]=${lin[i].toFixed(6)}; // ${FEAT_NAMES[i]}\n`;
+  }
+  out+='\n  // Quadratic weights\n';
+  let idx=NF;
+  for(let i=0;i<NF;i++){
+    for(let j=i;j<NF;j++){
+      if(Math.abs(weights[idx])>1e-6)
+        out+=`  ind.setQ(${i},${j},${weights[idx].toFixed(6)}); // ${FEAT_NAMES[i]}*${FEAT_NAMES[j]}\n`;
+      idx++;
+    }
+  }
+  out+='\n  return ind;\n}';
+
+  out+='\n\n// ---- Compact array form ----\n';
+  out+='// ind.wLin = new Float64Array([\n//   ';
+  for(let i=0;i<NF;i++){
+    out+=lin[i].toFixed(6);
+    if(i<NF-1)out+=',';
+    if((i+1)%9===0&&i<NF-1)out+='\n//   ';
+  }
+  out+='\n// ]);\n';
+
+  const quad=weights.slice(NF);
+  out+='// ind.wQuad = new Float64Array([\n//   ';
+  for(let i=0;i<quad.length;i++){
+    out+=quad[i].toFixed(6);
+    if(i<quad.length-1)out+=',';
+    if((i+1)%10===0&&i<quad.length-1)out+='\n//   ';
+  }
+  out+='\n// ]);';
+  return out;
+}
+
+function copyOutput(){
+  navigator.clipboard.writeText(outputBox.textContent).then(()=>{
+    document.querySelector('.copy-btn').textContent='Copied!';
+    setTimeout(()=>document.querySelector('.copy-btn').textContent='Copy to Clipboard',2000);
+  });
+}
+</script>
+</body>
+</html>

@@ -149,11 +149,14 @@ select{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:6px 10p
           <div class="thermo-item"><label>T (temperature)</label><span id="td-T">-</span></div>
           <div class="thermo-item"><label>&beta; = 1/T</label><span id="td-beta">-</span></div>
           <div class="thermo-item"><label>Z (partition fn)</label><span id="td-Z">-</span></div>
-          <div class="thermo-item"><label>F = T ln Z</label><span id="td-F">-</span></div>
+          <div class="thermo-item"><label>ln Z</label><span id="td-lnZ">-</span></div>
+          <div class="thermo-item"><label>&langle;Q&rangle; (expected)</label><span id="td-avgQ">-</span></div>
+          <div class="thermo-item"><label>TS (options)</label><span id="td-TS">-</span></div>
+          <div class="thermo-item"><label>F = &langle;Q&rangle; + TS</label><span id="td-F">-</span></div>
           <div class="thermo-item"><label>S (entropy)</label><span id="td-S">-</span></div>
           <div class="thermo-item"><label>C (spec. heat)</label><span id="td-C">-</span></div>
-          <div class="thermo-item"><label>&mu; imbalance</label><span id="td-mu">-</span></div>
           <div class="thermo-item"><label>Eval (pawns)</label><span id="td-E">-</span></div>
+          <div class="thermo-item" style="grid-column:span 2"><label>&mu; imbalance</label><span id="td-mu">-</span></div>
         </div>
       </div>
       <div class="move-list-wrap">
@@ -531,8 +534,9 @@ function computeThermodynamics(pos,depth,ind){
   const moves=pos.legalMoves();
   if(moves.length===0){
     const chk=pos.inCheck();
+    const Fterm=chk?-MATE:0;
     return {T:0,beta:Infinity,Z:chk?0:1,logZ:chk?-Infinity:0,
-      F:chk?-MATE:0,S:0,C:0,probs:null,moves:null,vals:null};
+      F:Fterm,S:0,C:0,meanQ:Fterm,TS:0,probs:null,moves:null,vals:null};
   }
 
   const vals=[];
@@ -571,7 +575,10 @@ function computeThermodynamics(pos,depth,ind){
   const varQ=probs.reduce((s,p,i)=>s+p*(vals[i]-meanQ)*(vals[i]-meanQ),0);
   const C=varQ/(T*T);
 
-  return {T,beta,Z,logZ,F,S,C,probs,moves,vals};
+  // Option premium: TS = F - <Q>
+  const TS=T*S;
+
+  return {T,beta,Z,logZ,F,S,C,meanQ,TS,probs,moves,vals};
 }
 
 // Chemical potentials: per-piece-type weighted xray contribution
@@ -1207,9 +1214,16 @@ function updateDashboard(){
   }else{
     document.getElementById('td-Z').textContent='-';
   }
+  document.getElementById('td-lnZ').textContent=
+    Number.isFinite(thermo.logZ)?thermo.logZ.toFixed(2):'-';
 
-  // Free energy F = T ln Z (converted to White's perspective)
-  const Fwhite=gamePos.turn===WHITE?thermo.F:-thermo.F;
+  // F = <Q> + TS decomposition (converted to White's perspective)
+  const sign=gamePos.turn===WHITE?1:-1;
+  const Fwhite=sign*thermo.F;
+  const avgQwhite=sign*thermo.meanQ;
+  document.getElementById('td-avgQ').textContent=
+    Number.isFinite(avgQwhite)?avgQwhite.toFixed(1):'-';
+  document.getElementById('td-TS').textContent=thermo.TS.toFixed(1);
   document.getElementById('td-F').textContent=
     Number.isFinite(Fwhite)?Fwhite.toFixed(1):'-';
 

@@ -496,23 +496,32 @@ class Individual{
 function createSeeded(){return new Individual();}
 function createRandom(){return new Individual();}
 
-function evalPos(pos,ind){return ind.leafEval(pos);}
-
-// Full-width minimax for computing continuation values.
-// No pruning — we need every move's value for the partition function.
+// Full-width thermodynamic search: returns F = T ln Z at each node.
+// At depth 0, returns raw leaf eval U. At depth > 0, computes partition
+// function over all continuations and returns the free energy.
 function thermoSearch(pos,depth,ind){
   if(depth<=0)return ind.leafEval(pos);
   const moves=pos.legalMoves();
   if(moves.length===0)return pos.inCheck()?-MATE:0;
-  let best=-Infinity;
+  const vals=[];
   for(const m of moves){
     pos.makeMove(m);
     const v=-thermoSearch(pos,depth-1,ind);
     pos.unmakeMove();
-    if(v>best)best=v;
+    vals.push(v);
   }
-  return best;
+  const n=vals.length;
+  const mean=vals.reduce((s,v)=>s+v,0)/n;
+  const variance=vals.reduce((s,v)=>s+(v-mean)*(v-mean),0)/n;
+  const T=Math.max(Math.sqrt(variance),T_FLOOR);
+  const vmax=Math.max(...vals);
+  let sumExp=0;
+  for(const v of vals)sumExp+=Math.exp((v-vmax)/T);
+  return T*(vmax/T+Math.log(sumExp));
 }
+
+// Evaluation function used by alpha-beta search: F at depth 1
+function evalPos(pos,ind){return thermoSearch(pos,1,ind);}
 
 // Compute all thermodynamic quantities for position P.
 // depth: how many plies deep to search for continuation values Q(P,a).
@@ -949,8 +958,8 @@ function disableEvoButtons(dis){
 // =========================================================================
 let gamePos=new Position();
 let engineWeights=null;
-const DIFFICULTIES={easy:200000,medium:1000000,hard:5000000,max:30000000};
-let thinkNodes=1000000;
+const DIFFICULTIES={easy:10000,medium:50000,hard:200000,max:1000000};
+let thinkNodes=50000;
 let lastSearchScore=0;
 function setDifficulty(lv){thinkNodes=DIFFICULTIES[lv]||1000000;}
 let selectedSq=-1,legalMovesCache=[],moveHistory=[];

@@ -981,8 +981,9 @@ function skipToPlay(){
 function newGame(){
   gamePos=new Position();gamePos.reset();
   selectedSq=-1;legalMovesCache=[];moveHistory=[];lastMove=null;
-  gameOver=false;pendingPromo=null;lastSearchScore=0;
+  gameOver=false;pendingPromo=null;
   playerColor=WHITE;boardFlipped=false;
+  lastSearchScore=0;
   renderPlayBoard();updateDashboard();
   document.getElementById('move-list').innerHTML='';
   setStatus('');

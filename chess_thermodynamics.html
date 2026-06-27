@@ -89,7 +89,7 @@ select{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:6px 10p
 <div id="evo-phase">
   <div class="phase-header">
     <h1><span>&#9813;</span> Chess Thermodynamics</h1>
-    <h2>Partition-Function Chess Engine</h2>
+    <h2>Partition Function Engine</h2>
   </div>
   <div class="evo-controls">
     <button class="primary" onclick="startEvo('quick')">Quick Train (10 gen)</button>
@@ -125,14 +125,14 @@ select{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:6px 10p
 <div id="play-phase" style="display:none">
   <div class="phase-header">
     <h1><span>&#9813;</span> Chess Thermodynamics &mdash; <span>Play</span></h1>
-    <h2>Soft-Minimax &middot; Partition Function Engine</h2>
+    <h2>Partition Function Engine &middot; Calculated Temperature</h2>
   </div>
   <div class="play-content">
     <div class="board-panel">
       <div class="chess-board big" id="board"></div>
       <div class="game-status" id="game-status"></div>
       <div class="toggle-row">
-        <label><input type="checkbox" id="tog-heat" onchange="toggleHeatmap()"> Entropy Field</label>
+        <label><input type="checkbox" id="tog-heat" onchange="toggleHeatmap()"> Energy Field</label>
         <label><input type="checkbox" id="tog-coords" checked onchange="renderPlayBoard()"> Coordinates</label>
       </div>
     </div>
@@ -146,10 +146,12 @@ select{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:6px 10p
         <div class="thermo-grid">
           <div class="thermo-item"><label>U<sup>w</sup> (xray)</label><span id="td-Uw">-</span></div>
           <div class="thermo-item"><label>U<sup>b</sup> (xray)</label><span id="td-Ub">-</span></div>
-          <div class="thermo-item"><label>F (free energy)</label><span id="td-F">-</span></div>
-          <div class="thermo-item"><label>S (cont. entropy)</label><span id="td-S">-</span></div>
-          <div class="thermo-item"><label>C (spec. heat)</label><span id="td-C">-</span></div>
           <div class="thermo-item"><label>T (temperature)</label><span id="td-T">-</span></div>
+          <div class="thermo-item"><label>&beta; = 1/T</label><span id="td-beta">-</span></div>
+          <div class="thermo-item"><label>Z (partition fn)</label><span id="td-Z">-</span></div>
+          <div class="thermo-item"><label>F = T ln Z</label><span id="td-F">-</span></div>
+          <div class="thermo-item"><label>S (entropy)</label><span id="td-S">-</span></div>
+          <div class="thermo-item"><label>C (spec. heat)</label><span id="td-C">-</span></div>
           <div class="thermo-item"><label>&mu; imbalance</label><span id="td-mu">-</span></div>
           <div class="thermo-item"><label>Eval (pawns)</label><span id="td-E">-</span></div>
         </div>
@@ -170,10 +172,7 @@ select{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:6px 10p
         </select>
       </div>
       <div class="toggle-row">
-        <label>T: <input type="range" id="thermo-T" min="0.5" max="20" step="0.5" value="3"
-          oninput="setThermoT(this.value)" style="width:80px;vertical-align:middle">
-          <span id="T-val">3.0</span></label>
-        <label>Depth: <select id="thermo-depth" onchange="setThermoDepth(this.value)">
+        <label>Thermo depth: <select id="thermo-depth" onchange="setThermoDepth(this.value)">
           <option value="1">1</option>
           <option value="2" selected>2</option>
           <option value="3">3</option>
@@ -185,32 +184,22 @@ select{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:6px 10p
 
 <script>
 // =========================================================================
-//  CONSTANTS
+//  CHESS ENGINE CORE
 // =========================================================================
 const EMPTY=0,PAWN=1,KNIGHT=2,BISHOP=3,ROOK=4,QUEEN=5,KING=6;
 const WHITE=1,BLACK=-1;
 const CWK=1,CWQ=2,CBK=4,CBQ=8;
-const GREEN=new Float64Array(4096);
-for(let a=0;a<64;a++)for(let b=0;b<64;b++)GREEN[a*64+b]=1/(1+Math.max(Math.abs((a&7)-(b&7)),Math.abs((a>>3)-(b>>3))));
 const MATE=1e6;
-const NF_TOTAL=29;
-const F_UW=0,F_UB=1,F_TW=2,F_TB=3,F_SW=4,F_SB=5;
-const F_D1W=6,F_D1B=7,F_D2W=8,F_D2B=9;
-const F_Q11W=10,F_Q11B=11,F_Q22W=12,F_Q22B=13,F_Q12W=14,F_Q12B=15;
-const F_AWK=16,F_DWK=17,F_ABK=18,F_DBK=19;
-const F_ETAW=20,F_ETAB=21;
-const F_PW=22,F_PB=23,F_PADVW=24,F_PADVB=25,F_PSPRW=26,F_PSPRB=27;
-const F_TAU=28;
-const INT_OFF=6;
-const NF=23;
-const NQ=NF*(NF+1)/2;
-
 const PIECE_CHAR={1:'♙',2:'♘',3:'♗',4:'♖',5:'♕',6:'♔',
   '-1':'♟','-2':'♞','-3':'♝','-4':'♜','-5':'♛','-6':'♚'};
 const PIECE_LETTER={1:'',2:'N',3:'B',4:'R',5:'Q',6:'K'};
 const FILES='abcdefgh';
 const KNIGHT_DR=[-2,-2,-1,-1,1,1,2,2],KNIGHT_DF=[-1,1,-2,2,-2,2,-1,1];
 const SLIDE_DIRS=[[0,1],[0,-1],[1,0],[-1,0],[1,1],[1,-1],[-1,1],[-1,-1]];
+
+// Green's function kernel for energy field visualization
+const GREEN=new Float64Array(4096);
+for(let a=0;a<64;a++)for(let b=0;b<64;b++)GREEN[a*64+b]=1/(1+Math.max(Math.abs((a&7)-(b&7)),Math.abs((a>>3)-(b>>3))));
 
 // Zobrist hashing
 const ZOB={p:new Int32Array(13*64),s:0,c:new Int32Array(16),e:new Int32Array(9)};
@@ -224,30 +213,22 @@ for(let i=0;i<16;i++)ZOB.c[i]=r();for(let i=0;i<9;i++)ZOB.e[i]=r();})();
 class Position{
   constructor(){
     this.board=new Int8Array(64);
-    this.turn=WHITE;
-    this.castling=CWK|CWQ|CBK|CBQ;
-    this.ep=-1;
-    this.halfmove=0;
-    this.fullmove=1;
-    this.hist=[];
+    this.turn=WHITE;this.castling=CWK|CWQ|CBK|CBQ;
+    this.ep=-1;this.halfmove=0;this.fullmove=1;this.hist=[];
   }
   reset(){
     this.board.fill(0);
     const back=[ROOK,KNIGHT,BISHOP,QUEEN,KING,BISHOP,KNIGHT,ROOK];
     for(let f=0;f<8;f++){
-      this.board[f]=back[f];
-      this.board[8+f]=PAWN;
-      this.board[48+f]=-PAWN;
-      this.board[56+f]=-back[f];
+      this.board[f]=back[f];this.board[8+f]=PAWN;
+      this.board[48+f]=-PAWN;this.board[56+f]=-back[f];
     }
     this.turn=WHITE;this.castling=15;this.ep=-1;this.halfmove=0;this.fullmove=1;this.hist=[];
   }
   clone(){
-    const p=new Position();
-    p.board.set(this.board);
+    const p=new Position();p.board.set(this.board);
     p.turn=this.turn;p.castling=this.castling;p.ep=this.ep;
-    p.halfmove=this.halfmove;p.fullmove=this.fullmove;
-    return p;
+    p.halfmove=this.halfmove;p.fullmove=this.fullmove;return p;
   }
   makeMove(m){
     const b=this.board,pc=b[m.from],cap=m.ep?b[m.epCap]:b[m.to];
@@ -260,17 +241,14 @@ class Position{
       if(m.castle===1){b[m.from+3]=0;b[m.from+1]=ROOK*this.turn;}
       else{b[m.from-4]=0;b[m.from-1]=ROOK*this.turn;}
     }
-    // Update castling rights
     const abspc=Math.abs(pc);
     if(abspc===KING){
-      if(this.turn===WHITE){this.castling&=~(CWK|CWQ);}
-      else{this.castling&=~(CBK|CBQ);}
+      if(this.turn===WHITE)this.castling&=~(CWK|CWQ);
+      else this.castling&=~(CBK|CBQ);
     }
     if(abspc===ROOK){
-      if(m.from===0)this.castling&=~CWQ;
-      if(m.from===7)this.castling&=~CWK;
-      if(m.from===56)this.castling&=~CBQ;
-      if(m.from===63)this.castling&=~CBK;
+      if(m.from===0)this.castling&=~CWQ;if(m.from===7)this.castling&=~CWK;
+      if(m.from===56)this.castling&=~CBQ;if(m.from===63)this.castling&=~CBK;
     }
     if(cap){
       if(m.to===0||m.epCap===0)this.castling&=~CWQ;
@@ -284,11 +262,9 @@ class Position{
     this.turn=-this.turn;
   }
   unmakeMove(){
-    const h=this.hist.pop();
-    this.turn=-this.turn;
+    const h=this.hist.pop();this.turn=-this.turn;
     if(this.turn===BLACK)this.fullmove--;
-    this.board[h.from]=h.pc;
-    this.board[h.to]=h.cap||0;
+    this.board[h.from]=h.pc;this.board[h.to]=h.cap||0;
     if(h.promo)this.board[h.to]=h.cap||0;
     if(h.epCap&&h.cap){this.board[h.to]=0;this.board[h.epCap]=h.cap;}
     if(h.castle){
@@ -299,27 +275,22 @@ class Position{
   }
   isAttacked(sq,byColor){
     const b=this.board,r=sq>>3,f=sq&7;
-    // Knights
     for(let i=0;i<8;i++){
       const nr=r+KNIGHT_DR[i],nf=f+KNIGHT_DF[i];
       if(nr>=0&&nr<8&&nf>=0&&nf<8&&b[nr*8+nf]===KNIGHT*byColor)return true;
     }
-    // King
     for(let dr=-1;dr<=1;dr++)for(let df=-1;df<=1;df++){
       if(!dr&&!df)continue;
       const nr=r+dr,nf=f+df;
       if(nr>=0&&nr<8&&nf>=0&&nf<8&&b[nr*8+nf]===KING*byColor)return true;
     }
-    // Pawn
     const pr=r-byColor;
     if(pr>=0&&pr<8){
       if(f>0&&b[pr*8+f-1]===PAWN*byColor)return true;
       if(f<7&&b[pr*8+f+1]===PAWN*byColor)return true;
     }
-    // Sliding: bishop/queen diag, rook/queen straight
     for(let d=0;d<8;d++){
-      const dr=SLIDE_DIRS[d][0],df=SLIDE_DIRS[d][1];
-      const isDiag=dr&&df;
+      const dr=SLIDE_DIRS[d][0],df=SLIDE_DIRS[d][1],isDiag=dr&&df;
       let cr=r+dr,cf=f+df;
       while(cr>=0&&cr<8&&cf>=0&&cf<8){
         const pc=b[cr*8+cf];
@@ -349,7 +320,6 @@ class Position{
       const pc=Math.abs(b[sq]),r=sq>>3,f=sq&7;
       if(pc===PAWN){
         const dir=t,sr=t===WHITE?1:6,pr=t===WHITE?7:0;
-        // Captures
         for(const df of[-1,1]){
           const nf=f+df,nr=r+dir;
           if(nf<0||nf>7||nr<0||nr>7)continue;
@@ -361,7 +331,6 @@ class Position{
           if(to===this.ep)moves.push({from:sq,to,ep:true,epCap:r*8+nf});
         }
         if(capturesOnly)continue;
-        // Forward
         const fwd=sq+dir*8;
         if(fwd>=0&&fwd<64&&!b[fwd]){
           if((fwd>>3)===pr){for(const pp of[QUEEN,ROOK,BISHOP,KNIGHT])moves.push({from:sq,to:fwd,promo:pp});}
@@ -418,78 +387,29 @@ class Position{
   }
   legalMoves(){
     return this.genPseudoMoves(false).filter(m=>{
-      this.makeMove(m);
-      const ok=!this.inCheck(-this.turn);
-      this.unmakeMove();
-      return ok;
+      this.makeMove(m);const ok=!this.inCheck(-this.turn);this.unmakeMove();return ok;
     });
   }
   legalCaptures(){
     return this.genPseudoMoves(true).filter(m=>{
-      this.makeMove(m);
-      const ok=!this.inCheck(-this.turn);
-      this.unmakeMove();
-      return ok;
+      this.makeMove(m);const ok=!this.inCheck(-this.turn);this.unmakeMove();return ok;
     });
   }
   hash(){
     let h=0;
     for(let sq=0;sq<64;sq++)if(this.board[sq])h^=ZOB.p[(this.board[sq]+6)*64+sq];
     if(this.turn===BLACK)h^=ZOB.s;
-    h^=ZOB.c[this.castling];
-    h^=ZOB.e[this.ep>=0?(this.ep&7)+1:0];
+    h^=ZOB.c[this.castling];h^=ZOB.e[this.ep>=0?(this.ep&7)+1:0];
     return h;
   }
 }
 
 // =========================================================================
-//  MOBILITY & THERMODYNAMIC FEATURES
+//  X-RAY MOBILITY
+//  Intrinsic reach of a piece on an empty board. This is the "ideal gas"
+//  contribution: each piece's energy depends only on its type and square,
+//  independent of other pieces.
 // =========================================================================
-function pieceMobility(board,sq,ep){
-  const pc=Math.abs(board[sq]),color=Math.sign(board[sq]),r=sq>>3,f=sq&7;
-  let cnt=0;
-  if(pc===PAWN){
-    const dir=color;
-    const sr=color===WHITE?1:6;
-    for(const df of[-1,1]){
-      const nf=f+df,nr=r+dir;
-      if(nf>=0&&nf<8&&nr>=0&&nr<8){
-        const to=nr*8+nf;
-        if((board[to]&&Math.sign(board[to])===-color)||to===ep)cnt++;
-      }
-    }
-    const fwd=sq+dir*8;
-    if(fwd>=0&&fwd<64&&!board[fwd]){
-      cnt++;
-      if(r===sr){const f2=sq+dir*16;if(!board[f2])cnt++;}
-    }
-  }else if(pc===KNIGHT){
-    for(let i=0;i<8;i++){
-      const nr=r+KNIGHT_DR[i],nf=f+KNIGHT_DF[i];
-      if(nr>=0&&nr<8&&nf>=0&&nf<8&&Math.sign(board[nr*8+nf])!==color)cnt++;
-    }
-  }else if(pc===KING){
-    for(let dr=-1;dr<=1;dr++)for(let df=-1;df<=1;df++){
-      if(!dr&&!df)continue;
-      const nr=r+dr,nf=f+df;
-      if(nr>=0&&nr<8&&nf>=0&&nf<8&&Math.sign(board[nr*8+nf])!==color)cnt++;
-    }
-  }else{
-    const dirs=pc===BISHOP?[4,5,6,7]:pc===ROOK?[0,1,2,3]:[0,1,2,3,4,5,6,7];
-    for(const d of dirs){
-      let cr=r+SLIDE_DIRS[d][0],cf=f+SLIDE_DIRS[d][1];
-      while(cr>=0&&cr<8&&cf>=0&&cf<8){
-        const tp=board[cr*8+cf];
-        if(tp&&Math.sign(tp)===color)break;
-        cnt++;
-        if(tp)break;
-        cr+=SLIDE_DIRS[d][0];cf+=SLIDE_DIRS[d][1];
-      }
-    }
-  }
-  return cnt;
-}
-
 function xrayMobility(pc,sq,color){
   const r=sq>>3,f=sq&7;
   if(pc===PAWN){
@@ -514,225 +434,43 @@ function xrayMobility(pc,sq,color){
   return c;
 }
 
-function moveConcentration(counts,total){
-  if(total===0)return 0;
-  let H=0;
-  for(let i=0;i<counts.length;i++){
-    if(counts[i]>0){const p=counts[i]/total;H-=p*Math.log(p);}
-  }
-  return total/Math.exp(H);
-}
+// =========================================================================
+//  THERMODYNAMIC FRAMEWORK
+//
+//  Temperature T is CALCULATED from the position's continuation ensemble.
+//    T = sigma(Q) = standard deviation of legal move values.
+//
+//  Cold position: forcing, narrow, calculation-dominated (T small)
+//  Hot position:  many viable futures, strategically unsettled (T large)
+//
+//  From T, the full partition function is constructed:
+//    Z = sum_a exp(Q_a / T)          partition function
+//    F = T ln Z                       free energy (position value)
+//    S = -sum_a pi_a ln pi_a          continuation entropy
+//    C = Var_pi(Q) / T^2              specific heat (tactical volatility)
+//    beta = 1 / T                     inverse temperature
+//
+//  where pi_a = exp(Q_a / T) / Z is the Boltzmann probability of move a.
+//
+//  At T -> 0, F -> max(Q_a) and we recover minimax.
+//  At finite T, having many good options (high entropy) adds value.
+// =========================================================================
 
-function addXraySquares(pc,sq,color,covMap){
-  const r=sq>>3,f=sq&7;
-  if(pc===PAWN){
-    const dir=color,nr=r+dir;
-    if(nr>=0&&nr<=7){
-      covMap[nr*8+f]++;
-      if(f>0)covMap[nr*8+f-1]++;
-      if(f<7)covMap[nr*8+f+1]++;
-    }
-    if(r===(color===WHITE?1:6))covMap[(r+dir*2)*8+f]++;
-    return;
-  }
-  if(pc===KNIGHT){
-    for(let i=0;i<8;i++){
-      const nr=r+KNIGHT_DR[i],nf=f+KNIGHT_DF[i];
-      if(nr>=0&&nr<8&&nf>=0&&nf<8)covMap[nr*8+nf]++;
-    }
-    return;
-  }
-  if(pc===KING){
-    for(let dr=-1;dr<=1;dr++)for(let df=-1;df<=1;df++){
-      if(!dr&&!df)continue;
-      const nr=r+dr,nf=f+df;
-      if(nr>=0&&nr<8&&nf>=0&&nf<8)covMap[nr*8+nf]++;
-    }
-    return;
-  }
-  const dirs=pc===BISHOP?[4,5,6,7]:pc===ROOK?[0,1,2,3]:[0,1,2,3,4,5,6,7];
-  for(const d of dirs){
-    let cr=r+SLIDE_DIRS[d][0],cf=f+SLIDE_DIRS[d][1];
-    while(cr>=0&&cr<8&&cf>=0&&cf<8){
-      covMap[cr*8+cf]++;
-      cr+=SLIDE_DIRS[d][0];cf+=SLIDE_DIRS[d][1];
-    }
-  }
-}
+const PAWN_XRAY=3.5;
+const T_FLOOR=0.1;
+let thermoDepth=2;
 
-function computeFeatures(pos){
-  const b=pos.board,feat=new Float64Array(NF_TOTAL);
-  const covW=new Uint8Array(64),covB=new Uint8Array(64);
-  const srcW=new Float64Array(64),srcB=new Float64Array(64);
-  const movesW=[],movesB=[];
-  let wkSq=-1,bkSq=-1;
-  let totalXrayW=0,totalXrayB=0,Uw=0,Ub=0;
-  let pawnCountW=0,pawnCountB=0,pawnAdvW=0,pawnAdvB=0;
-  const pawnFilesW=[],pawnFilesB=[];
-
-  // Pass 1: per-piece metrics
-  for(let sq=0;sq<64;sq++){
-    if(!b[sq])continue;
-    const apc=Math.abs(b[sq]),color=Math.sign(b[sq]);
-    if(apc===KING){if(color===WHITE)wkSq=sq;else bkSq=sq;}
-    const fi=xrayMobility(apc,sq,color);
-    addXraySquares(apc,sq,color,color===WHITE?covW:covB);
-    if(color===WHITE){srcW[sq]=fi;totalXrayW+=fi;}
-    else{srcB[sq]=fi;totalXrayB+=fi;}
-    const mi=pieceMobility(b,sq,pos.ep);
-    if(color===WHITE){Uw+=mi;movesW.push(mi);}
-    else{Ub+=mi;movesB.push(mi);}
-    if(apc===PAWN){
-      if(color===WHITE){pawnCountW++;pawnAdvW+=(sq>>3)-1;pawnFilesW.push(sq&7);}
-      else{pawnCountB++;pawnAdvB+=6-(sq>>3);pawnFilesB.push(sq&7);}
-    }
-  }
-
-  // U (internal energy = total xray mobility)
-  feat[F_UW]=totalXrayW;feat[F_UB]=totalXrayB;
-
-  // T (temperature = move concentration)
-  feat[F_TW]=moveConcentration(movesW,Uw);
-  feat[F_TB]=moveConcentration(movesB,Ub);
-
-  // S (xray redundancy = 1 - distinct/total)
-  let unionW=0,unionB=0;
-  for(let sq=0;sq<64;sq++){if(covW[sq])unionW++;if(covB[sq])unionB++;}
-  feat[F_SW]=totalXrayW>0?1-unionW/totalXrayW:0;
-  feat[F_SB]=totalXrayB>0?1-unionB/totalXrayB:0;
-
-  // Pass 2: propagate xray sources into fields via Green's function
-  const rhoW=new Float64Array(64),rhoB=new Float64Array(64);
-  for(let x=0;x<64;x++){
-    let fw=0,fb=0;
-    for(let s=0;s<64;s++){
-      if(srcW[s]>0||srcB[s]>0){
-        const g=GREEN[x*64+s];
-        fw+=srcW[s]*g;fb+=srcB[s]*g;
-      }
-    }
-    rhoW[x]=fw;rhoB[x]=fb;
-  }
-
-  // Center of field (from xray source distribution)
-  let totalAbs=0,cx=0,cy=0;
-  for(let sq=0;sq<64;sq++){
-    const a=srcW[sq]+srcB[sq];
-    if(a>0){cx+=a*(sq&7);cy+=a*(sq>>3);totalAbs+=a;}
-  }
-  if(totalAbs<1e-12)totalAbs=1;
-  cx/=totalAbs;cy/=totalAbs;
-
-  // Inertia tensor
-  let I11=0,I12=0,I22=0;
-  for(let sq=0;sq<64;sq++){
-    const a=srcW[sq]+srcB[sq];
-    if(a<=0)continue;
-    const dx=(sq&7)-cx,dy=(sq>>3)-cy;
-    I11+=a*dx*dx;I12+=a*dx*dy;I22+=a*dy*dy;
-  }
-
-  // Eigendecomposition with sign anchoring
-  const tr=I11+I22,det=I11*I22-I12*I12;
-  const disc=Math.sqrt(Math.max(0,(tr*tr-4*det)));
-  const lam1=(tr+disc)/2,lam2=(tr-disc)/2;
-  let e1x,e1y,e2x,e2y;
-  if(Math.abs(I12)>1e-12){
-    e1x=lam1-I22;e1y=I12;
-    const n1=Math.sqrt(e1x*e1x+e1y*e1y);
-    if(n1>1e-12){e1x/=n1;e1y/=n1;}else{e1x=1;e1y=0;}
-    e2x=-e1y;e2y=e1x;
-  }else{
-    e1x=1;e1y=0;e2x=0;e2y=1;
-  }
-  // Anchor: e1 points toward rank 8 (positive y); e2 is right-handed
-  if(e1y<0){e1x=-e1x;e1y=-e1y;e2x=-e2x;e2y=-e2y;}
-
-  // Dipole and quadrupole moments in eigenbasis
-  let d1w=0,d1b=0,d2w=0,d2b=0;
-  let q11w=0,q11b=0,q22w=0,q22b=0,q12w=0,q12b=0;
-  for(let sq=0;sq<64;sq++){
-    const sw=srcW[sq],sb=srcB[sq];
-    if(sw<=0&&sb<=0)continue;
-    const dx=(sq&7)-cx,dy=(sq>>3)-cy;
-    const u1=dx*e1x+dy*e1y;
-    const u2=dx*e2x+dy*e2y;
-    if(sw>0){
-      d1w+=sw*u1;d2w+=sw*u2;
-      q11w+=sw*u1*u1;q22w+=sw*u2*u2;q12w+=sw*u1*u2;
-    }
-    if(sb>0){
-      d1b+=sb*u1;d2b+=sb*u2;
-      q11b+=sb*u1*u1;q22b+=sb*u2*u2;q12b+=sb*u1*u2;
-    }
-  }
-  feat[F_D1W]=d1w;feat[F_D1B]=d1b;feat[F_D2W]=d2w;feat[F_D2B]=d2b;
-  feat[F_Q11W]=q11w;feat[F_Q11B]=q11b;feat[F_Q22W]=q22w;feat[F_Q22B]=q22b;
-  feat[F_Q12W]=q12w;feat[F_Q12B]=q12b;
-
-  // King-field coupling (from propagated fields)
-  if(wkSq>=0&&bkSq>=0){
-    let awk=0,dwk=0,abk=0,dbk=0;
-    for(let sq=0;sq<64;sq++){
-      const kw=GREEN[sq*64+wkSq],kb=GREEN[sq*64+bkSq];
-      awk+=rhoB[sq]*kw;dwk+=rhoW[sq]*kw;
-      abk+=rhoW[sq]*kb;dbk+=rhoB[sq]*kb;
-    }
-    feat[F_AWK]=awk;feat[F_DWK]=dwk;feat[F_ABK]=abk;feat[F_DBK]=dbk;
-  }
-
-  // Meta-entropy (distribution of xray DOF across pieces)
-  if(totalXrayW>1e-12){
-    let eta=0;
-    for(let sq=0;sq<64;sq++){
-      if(srcW[sq]>0){const p=srcW[sq]/totalXrayW;eta-=p*Math.log(p);}
-    }
-    feat[F_ETAW]=eta;
-  }
-  if(totalXrayB>1e-12){
-    let eta=0;
-    for(let sq=0;sq<64;sq++){
-      if(srcB[sq]>0){const p=srcB[sq]/totalXrayB;eta-=p*Math.log(p);}
-    }
-    feat[F_ETAB]=eta;
-  }
-
-  // Pawn features
-  feat[F_PW]=pawnCountW;feat[F_PB]=pawnCountB;
-  feat[F_PADVW]=pawnAdvW;feat[F_PADVB]=pawnAdvB;
-  if(pawnFilesW.length>1){
-    const m=pawnFilesW.reduce((a,b)=>a+b,0)/pawnFilesW.length;
-    feat[F_PSPRW]=pawnFilesW.reduce((a,b)=>a+(b-m)*(b-m),0)/pawnFilesW.length;
-  }
-  if(pawnFilesB.length>1){
-    const m=pawnFilesB.reduce((a,b)=>a+b,0)/pawnFilesB.length;
-    feat[F_PSPRB]=pawnFilesB.reduce((a,b)=>a+(b-m)*(b-m),0)/pawnFilesB.length;
-  }
-
-  // Spatial tension (overlap integral of opposing propagated fields)
-  let tau=0;
-  for(let x=0;x<64;x++)tau+=rhoW[x]*rhoB[x];
-  feat[F_TAU]=tau;
-
-  return feat;
-}
+function setThermoDepth(v){thermoDepth=parseInt(v);updateDashboard();}
 
 // =========================================================================
-//  INDIVIDUAL (EVOLVABLE PIECE-WEIGHT CARRIER)
-//  In the partition-function framework, the leaf evaluator is the "ideal
-//  gas" internal energy: U = Σ w[type] * xray_mobility(piece).
-//  The weights are chemical potentials — they determine each piece type's
-//  contribution per unit of xray reach. Evolution discovers them.
+//  INDIVIDUAL (EVOLVABLE CHEMICAL POTENTIALS)
+//  Leaf evaluator = ideal gas: U = sum mu_type * xray_mobility(piece)
 // =========================================================================
 class Individual{
   constructor(){
-    this.pieceW=new Float64Array(7); // indexed by piece type constant
-    this.pieceW[PAWN]=1.0;
-    this.pieceW[KNIGHT]=1.0;
-    this.pieceW[BISHOP]=1.0;
-    this.pieceW[ROOK]=1.0;
-    this.pieceW[QUEEN]=1.0;
-    this.pieceW[KING]=1.0;
+    this.pieceW=new Float64Array(7);
+    this.pieceW[PAWN]=1.0;this.pieceW[KNIGHT]=1.0;this.pieceW[BISHOP]=1.0;
+    this.pieceW[ROOK]=1.0;this.pieceW[QUEEN]=1.0;this.pieceW[KING]=1.0;
     this.fitness=0;
   }
   leafEval(pos){
@@ -756,19 +494,11 @@ class Individual{
     return {Uw,Ub};
   }
   clone(){
-    const c=new Individual();
-    c.pieceW.set(this.pieceW);
-    c.fitness=this.fitness;
-    return c;
+    const c=new Individual();c.pieceW.set(this.pieceW);c.fitness=this.fitness;return c;
   }
 }
 
-function createSeeded(){
-  const ind=new Individual();
-  // Default chemical potentials (all equal = ideal gas)
-  return ind;
-}
-
+function createSeeded(){return new Individual();}
 
 function createRandom(){
   const ind=new Individual();
@@ -776,9 +506,93 @@ function createRandom(){
   return ind;
 }
 
+function evalPos(pos,ind){return ind.leafEval(pos);}
+
+// Full-width minimax for computing continuation values.
+// No pruning — we need every move's value for the partition function.
+function thermoSearch(pos,depth,ind){
+  if(depth<=0)return ind.leafEval(pos);
+  const moves=pos.legalMoves();
+  if(moves.length===0)return pos.inCheck()?-MATE:0;
+  let best=-Infinity;
+  for(const m of moves){
+    pos.makeMove(m);
+    const v=-thermoSearch(pos,depth-1,ind);
+    pos.unmakeMove();
+    if(v>best)best=v;
+  }
+  return best;
+}
+
+// Compute all thermodynamic quantities for position P.
+// depth: how many plies deep to search for continuation values Q(P,a).
+// Returns {T, beta, Z, logZ, F, S, C, probs, moves, vals}
+function computeThermodynamics(pos,depth,ind){
+  const moves=pos.legalMoves();
+  if(moves.length===0){
+    const chk=pos.inCheck();
+    return {T:0,beta:Infinity,Z:chk?0:1,logZ:chk?-Infinity:0,
+      F:chk?-MATE:0,S:0,C:0,probs:null,moves:null,vals:null};
+  }
+
+  const vals=[];
+  for(const m of moves){
+    pos.makeMove(m);
+    const v=-thermoSearch(pos,depth-1,ind);
+    pos.unmakeMove();
+    vals.push(v);
+  }
+
+  const n=vals.length;
+  const mean=vals.reduce((s,v)=>s+v,0)/n;
+  const variance=vals.reduce((s,v)=>s+(v-mean)*(v-mean),0)/n;
+  const T=Math.max(Math.sqrt(variance),T_FLOOR);
+  const beta=1/T;
+
+  // Partition function Z = sum exp(Q_a / T), using log-sum-exp for stability
+  const vmax=Math.max(...vals);
+  let sumExp=0;
+  for(const v of vals)sumExp+=Math.exp((v-vmax)/T);
+  const logZ=vmax/T+Math.log(sumExp);
+  const Z=Math.exp(logZ);
+
+  // Free energy F = T ln Z
+  const F=T*logZ;
+
+  // Boltzmann probabilities pi_a = exp(Q_a / T) / sum exp(Q_a / T)
+  const probs=vals.map(v=>Math.exp((v-vmax)/T)/sumExp);
+
+  // Continuation entropy S = -sum pi_a ln pi_a
+  let S=0;
+  for(const p of probs){if(p>1e-15)S-=p*Math.log(p);}
+
+  // Specific heat C = Var_pi(Q) / T^2
+  const meanQ=probs.reduce((s,p,i)=>s+p*vals[i],0);
+  const varQ=probs.reduce((s,p,i)=>s+p*(vals[i]-meanQ)*(vals[i]-meanQ),0);
+  const C=varQ/(T*T);
+
+  return {T,beta,Z,logZ,F,S,C,probs,moves,vals};
+}
+
+// Chemical potentials: per-piece-type weighted xray contribution
+function computeChemicalPotentials(pos,ind){
+  const names={1:'P',2:'N',3:'B',4:'R',5:'Q',6:'K'};
+  const result={};
+  for(const v of Object.values(names))result[v]={w:0,b:0,nw:0,nb:0};
+  for(let sq=0;sq<64;sq++){
+    if(!pos.board[sq])continue;
+    const apc=Math.abs(pos.board[sq]),color=Math.sign(pos.board[sq]);
+    const fi=xrayMobility(apc,sq,color)*ind.pieceW[apc];
+    const name=names[apc];
+    if(color===WHITE){result[name].w+=fi;result[name].nw++;}
+    else{result[name].b+=fi;result[name].nb++;}
+  }
+  return result;
+}
 
 // =========================================================================
 //  SEARCH ENGINE (TT, Iterative Deepening, Null Move, LMR, Killers)
+//  Used for actual move selection. This is the T -> 0 limit (minimax).
 // =========================================================================
 const TT_SZ=1<<20,TT_EX=0,TT_AL=1,TT_BE=2;
 let ttab=new Array(TT_SZ).fill(null);
@@ -792,105 +606,23 @@ function clearKillers(){for(let i=0;i<MAX_PLY;i++)killers[i]=[null,null];}
 
 let searchNodes=0,searchAborted=false,searchMaxNodes=Infinity;
 
-function evalPos(pos,ind){
-  return ind.leafEval(pos);
+function mvvLva(board,m){
+  const victim=Math.abs(board[m.to])||0;
+  const attacker=Math.abs(board[m.from]);
+  return victim*10-attacker+(m.promo?50:0);
 }
 
-// =========================================================================
-//  SOFT-MINIMAX (PARTITION FUNCTION OVER CONTINUATIONS)
-//  Computes the thermodynamic free energy of a position by summing over
-//  all legal continuations with Boltzmann weights exp(V/T).
-//  Returns: value (free energy), entropy (continuation entropy),
-//  heat (specific heat = variance/T²), probs (Boltzmann move probs).
-// =========================================================================
-let thermoT=3.0;
-let thermoDepth=2;
-const PAWN_XRAY=3.5;
-
-function setThermoT(v){
-  thermoT=parseFloat(v);
-  document.getElementById('T-val').textContent=thermoT.toFixed(1);
-  updateDashboard();
-}
-function setThermoDepth(v){
-  thermoDepth=parseInt(v);
-  updateDashboard();
-}
-
-function softMinimax(pos,depth,T,ind){
-  if(depth<=0){
-    return {value:ind.leafEval(pos),entropy:0,heat:0,probs:null,moves:null,vals:null};
-  }
-  const moves=pos.legalMoves();
-  if(moves.length===0){
-    return pos.inCheck()
-      ?{value:-MATE,entropy:0,heat:0,probs:null,moves:null,vals:null}
-      :{value:0,entropy:0,heat:0,probs:null,moves:null,vals:null};
-  }
-  const vals=new Float64Array(moves.length);
-  for(let i=0;i<moves.length;i++){
-    pos.makeMove(moves[i]);
-    const child=softMinimax(pos,depth-1,T,ind);
-    vals[i]=-child.value;
-    pos.unmakeMove();
-  }
-  const vmax=Math.max(...vals);
-  let sumExp=0;
-  for(let i=0;i<vals.length;i++)sumExp+=Math.exp((vals[i]-vmax)/T);
-  const F=vmax+T*Math.log(sumExp);
-  const probs=new Float64Array(vals.length);
-  for(let i=0;i<vals.length;i++)probs[i]=Math.exp((vals[i]-vmax)/T)/sumExp;
-  let S=0;
-  for(let i=0;i<probs.length;i++)if(probs[i]>1e-15)S-=probs[i]*Math.log(probs[i]);
-  let mu=0;
-  for(let i=0;i<vals.length;i++)mu+=probs[i]*vals[i];
-  let sigma2=0;
-  for(let i=0;i<vals.length;i++)sigma2+=probs[i]*(vals[i]-mu)*(vals[i]-mu);
-  const C=sigma2/(T*T);
-  return {value:F,entropy:S,heat:C,probs,moves,vals};
-}
-
-function computeChemicalPotentials(pos,ind){
-  const potentials={};
-  const types=[PAWN,KNIGHT,BISHOP,ROOK,QUEEN];
-  const names=['P','N','B','R','Q'];
-  for(let t=0;t<types.length;t++){
-    let sumW=0,countW=0,sumB=0,countB=0;
-    for(let sq=0;sq<64;sq++){
-      if(!pos.board[sq])continue;
-      const apc=Math.abs(pos.board[sq]),color=Math.sign(pos.board[sq]);
-      if(apc===types[t]){
-        const fi=xrayMobility(apc,sq,color)*ind.pieceW[apc];
-        if(color===WHITE){sumW+=fi;countW++;}
-        else{sumB+=fi;countB++;}
-      }
-    }
-    potentials[names[t]]={
-      w:countW>0?sumW/countW:0,
-      b:countB>0?sumB/countB:0,
-      nw:countW,nb:countB
-    };
-  }
-  return potentials;
-}
-
-function mvvLva(b,m){
-  const victim=b[m.to]?Math.abs(b[m.to])*100:0;
-  return victim*10-Math.abs(b[m.from])+(m.promo?500:0);
-}
-
-function orderMoves(moves,b,ttMove,ply){
+function orderMoves(moves,board,ttMove,ply){
   for(const m of moves){
-    let sc=0;
-    if(ttMove&&m.from===ttMove.from&&m.to===ttMove.to)sc=10000;
-    else if(b[m.to])sc=5000+mvvLva(b,m);
-    else if(m.promo)sc=4500;
+    m.ord=0;
+    if(ttMove&&m.from===ttMove.from&&m.to===ttMove.to)m.ord=10000;
+    else if(board[m.to]||m.ep)m.ord=5000+mvvLva(board,m);
+    else if(m.promo)m.ord=4500+m.promo;
     else{
       const k=killers[ply];
-      if(k[0]&&m.from===k[0].from&&m.to===k[0].to)sc=4000;
-      else if(k[1]&&m.from===k[1].from&&m.to===k[1].to)sc=3900;
+      if(k[0]&&m.from===k[0].from&&m.to===k[0].to)m.ord=4000;
+      else if(k[1]&&m.from===k[1].from&&m.to===k[1].to)m.ord=3900;
     }
-    m.ord=sc;
   }
   moves.sort((a,c)=>c.ord-a.ord);
 }
@@ -940,7 +672,6 @@ function searchAB(pos,depth,alpha,beta,ind,ply,nullOk){
 
   const inCheck=pos.inCheck();
 
-  // Null move pruning
   if(nullOk&&!inCheck&&depth>=3&&ply>0){
     const savedTurn=pos.turn,savedEp=pos.ep;
     pos.turn=-pos.turn;pos.ep=-1;
@@ -964,7 +695,6 @@ function searchAB(pos,depth,alpha,beta,ind,ply,nullOk){
 
     let sc;
     const ext=inCheck?1:0;
-
     if(i===0){
       sc=-searchAB(pos,depth-1+ext,-beta,-alpha,ind,ply+1,true);
     }else{
@@ -1060,23 +790,18 @@ async function playTrainingGame(w,bl,maxMoves){
     pos.makeMove(m);
     evoCurrentBoard=pos.clone();
     if(mv%4===0)await yieldFrame();
-
-    // Repetition detection
     const h=pos.hash();
     posHashes.set(h,(posHashes.get(h)||0)+1);
     if(posHashes.get(h)>=3)break;
-
-    // Material-based adjudication (objective, no eval involved)
     const matW=materialCount(pos.board,WHITE),matB=materialCount(pos.board,BLACK);
     const diff=matW-matB;
     if(Math.abs(diff)>=13){result=diff>0?1:-1;break;}
-
     if(pos.halfmove>=100)break;
   }
   return result;
 }
 
-let evoPop=null,evoConfig=null,evoRunning=false,evoPaused=false;
+let evoPop=null,evoConfig=null,evoRunning=false;
 let evoGen=0,evoTotalGames=0,evoFitnessHistory=[];
 let evoCurrentBoard=null;
 
@@ -1088,16 +813,18 @@ function initPop(K){
   return pop;
 }
 
+function gaussRand(){
+  let u=0,v=0;
+  while(u===0)u=Math.random();while(v===0)v=Math.random();
+  return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);
+}
+
 function evolvePop(pop,gen,totalGens){
   pop.sort((a,b)=>b.fitness-a.fitness);
-
-  const K=pop.length;
-  const eliteCount=Math.max(2,Math.floor(K*0.3));
+  const K=pop.length,eliteCount=Math.max(2,Math.floor(K*0.3));
   const mutScale=Math.max(0.1,1.0-0.8*gen/totalGens);
-
   const newPop=[];
   for(let i=0;i<eliteCount;i++)newPop.push(pop[i].clone());
-
   while(newPop.length<K){
     const p1=pop[Math.floor(Math.random()*eliteCount)];
     const p2=pop[Math.floor(Math.random()*Math.ceil(K*0.5))];
@@ -1113,15 +840,8 @@ function evolvePop(pop,gen,totalGens){
   return newPop;
 }
 
-function gaussRand(){
-  let u=0,v=0;
-  while(u===0)u=Math.random();
-  while(v===0)v=Math.random();
-  return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);
-}
-
 async function runEvolution(config){
-  evoRunning=true;evoPaused=false;
+  evoRunning=true;
   const K=config.K||8,G=config.G||2,gens=config.gens||25;
   evoConfig={K,G,gens};
   evoPop=initPop(K);
@@ -1141,8 +861,7 @@ async function runEvolution(config){
           w.fitness+=res;bl.fitness-=res;
           evoTotalGames++;
           if(evoTotalGames%4===0){
-            updateEvoUI();
-            await yieldFrame();
+            updateEvoUI();await yieldFrame();
             if(!evoRunning)return;
           }
         }
@@ -1150,18 +869,17 @@ async function runEvolution(config){
     }
     evoPop=evolvePop(evoPop,gen,gens);
     evoFitnessHistory.push(evoPop[0].fitness);
-    updateEvoUI();
-    drawFitnessChart();
+    updateEvoUI();drawFitnessChart();
     const bw=evoPop[0].pieceW;
     log('Gen '+(gen+1)+': fit='+evoPop[0].fitness.toFixed(1)+
-      ' w=[P'+bw[PAWN].toFixed(2)+' N'+bw[KNIGHT].toFixed(2)+' B'+bw[BISHOP].toFixed(2)+
+      ' μ=[P'+bw[PAWN].toFixed(2)+' N'+bw[KNIGHT].toFixed(2)+' B'+bw[BISHOP].toFixed(2)+
       ' R'+bw[ROOK].toFixed(2)+' Q'+bw[QUEEN].toFixed(2)+']');
     await yieldFrame();
   }
 
   evoRunning=false;
   disableEvoButtons(false);
-  log('Evolution complete! Best individual ready. Click "Play" to start a game.');
+  log('Evolution complete! Best individual ready.');
   const playBtn=document.createElement('button');
   playBtn.className='primary';playBtn.textContent='Play Against the Engine';
   playBtn.onclick=()=>startPlay(evoPop[0]);
@@ -1175,8 +893,7 @@ function yieldFrame(){return new Promise(r=>requestAnimationFrame(r));}
 // =========================================================================
 function log(msg){
   const el=document.getElementById('evo-log');
-  el.textContent+='\n'+msg;
-  el.scrollTop=el.scrollHeight;
+  el.textContent+='\n'+msg;el.scrollTop=el.scrollHeight;
 }
 
 function updateEvoUI(){
@@ -1190,8 +907,7 @@ function updateEvoUI(){
   document.getElementById('st-pw').textContent=
     'P'+pw[PAWN].toFixed(2)+' N'+pw[KNIGHT].toFixed(2)+' B'+pw[BISHOP].toFixed(2)+
     ' R'+pw[ROOK].toFixed(2)+' Q'+pw[QUEEN].toFixed(2);
-  const pct=gens?((evoGen+1)/gens*100):0;
-  document.getElementById('evo-prog').style.width=pct+'%';
+  document.getElementById('evo-prog').style.width=(gens?((evoGen+1)/gens*100):0)+'%';
 }
 
 function drawFitnessChart(){
@@ -1201,35 +917,26 @@ function drawFitnessChart(){
   ctx.clearRect(0,0,W,H);
   const data=evoFitnessHistory;
   if(data.length<2)return;
-  const mn=Math.min(...data),mx=Math.max(...data);
-  const range=mx-mn||1;
-  ctx.strokeStyle='#58a6ff';ctx.lineWidth=2;
-  ctx.beginPath();
+  const mn=Math.min(...data),mx=Math.max(...data),range=mx-mn||1;
+  ctx.strokeStyle='#58a6ff';ctx.lineWidth=2;ctx.beginPath();
   for(let i=0;i<data.length;i++){
-    const x=i/(data.length-1)*W;
-    const y=H-(data[i]-mn)/range*H*0.85-H*0.05;
+    const x=i/(data.length-1)*W,y=H-(data[i]-mn)/range*H*0.85-H*0.05;
     i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
   }
   ctx.stroke();
   ctx.fillStyle='#8b949e';ctx.font=(H*0.06)+'px sans-serif';
-  ctx.fillText('Gen 1',4,H-4);
-  ctx.textAlign='right';
-  ctx.fillText('Gen '+data.length,W-4,H-4);
-  ctx.textAlign='left';
+  ctx.fillText('Gen 1',4,H-4);ctx.textAlign='right';
+  ctx.fillText('Gen '+data.length,W-4,H-4);ctx.textAlign='left';
 }
 
 function renderMiniBoard(pos){
-  const el=document.getElementById('evo-board');
-  el.innerHTML='';
+  const el=document.getElementById('evo-board');el.innerHTML='';
   for(let r=7;r>=0;r--)for(let f=0;f<8;f++){
-    const sq=r*8+f;
-    const div=document.createElement('div');
+    const sq=r*8+f,div=document.createElement('div');
     div.className='sq '+((r+f)%2?'dark':'light');
     if(pos&&pos.board[sq]){
-      const s=document.createElement('span');
-      s.className='piece';
-      s.textContent=PIECE_CHAR[pos.board[sq]];
-      div.appendChild(s);
+      const s=document.createElement('span');s.className='piece';
+      s.textContent=PIECE_CHAR[pos.board[sq]];div.appendChild(s);
     }
     el.appendChild(div);
   }
@@ -1250,15 +957,9 @@ const DIFFICULTIES={easy:200000,medium:1000000,hard:5000000,max:30000000};
 let thinkNodes=1000000;
 let lastSearchScore=0;
 function setDifficulty(lv){thinkNodes=DIFFICULTIES[lv]||1000000;}
-let selectedSq=-1;
-let legalMovesCache=[];
-let moveHistory=[];
-let lastMove=null;
-let playerColor=WHITE;
-let gameOver=false;
-let showHeatmap=false;
-let boardFlipped=false;
-let pendingPromo=null;
+let selectedSq=-1,legalMovesCache=[],moveHistory=[];
+let lastMove=null,playerColor=WHITE,gameOver=false;
+let showHeatmap=false,boardFlipped=false,pendingPromo=null;
 
 function startPlay(ind){
   engineWeights=ind.clone();
@@ -1268,31 +969,22 @@ function startPlay(ind){
 }
 
 function skipToPlay(){
-  if(evoRunning){evoRunning=false;}
+  if(evoRunning)evoRunning=false;
   startPlay(createSeeded());
 }
 
 function newGame(){
   gamePos=new Position();gamePos.reset();
   selectedSq=-1;legalMovesCache=[];moveHistory=[];lastMove=null;
-  gameOver=false;pendingPromo=null;
+  gameOver=false;pendingPromo=null;lastSearchScore=0;
   playerColor=WHITE;boardFlipped=false;
-  renderPlayBoard();
-  updateDashboard();
+  renderPlayBoard();updateDashboard();
   document.getElementById('move-list').innerHTML='';
   setStatus('');
 }
 
-function flipBoard(){
-  boardFlipped=!boardFlipped;
-  renderPlayBoard();
-}
-
-function toggleHeatmap(){
-  showHeatmap=document.getElementById('tog-heat').checked;
-  renderPlayBoard();
-}
-
+function flipBoard(){boardFlipped=!boardFlipped;renderPlayBoard();}
+function toggleHeatmap(){showHeatmap=document.getElementById('tog-heat').checked;renderPlayBoard();}
 function sqName(sq){return FILES[sq&7]+(1+(sq>>3));}
 
 function moveToSAN(pos,m){
@@ -1300,7 +992,6 @@ function moveToSAN(pos,m){
   if(m.castle)return m.castle===1?'O-O':'O-O-O';
   let s='';
   if(pc!==PAWN)s+=PIECE_LETTER[pc];
-  // Disambiguation
   if(pc!==PAWN&&pc!==KING){
     const others=pos.legalMoves().filter(o=>o.to===m.to&&o.from!==m.from&&Math.abs(pos.board[o.from])===pc);
     if(others.length){
@@ -1312,10 +1003,7 @@ function moveToSAN(pos,m){
     }
   }
   const isCapture=pos.board[m.to]||m.ep;
-  if(isCapture){
-    if(pc===PAWN)s+=FILES[m.from&7];
-    s+='x';
-  }
+  if(isCapture){if(pc===PAWN)s+=FILES[m.from&7];s+='x';}
   s+=sqName(m.to);
   if(m.promo)s+='='+PIECE_LETTER[m.promo];
   pos.makeMove(m);
@@ -1326,8 +1014,7 @@ function moveToSAN(pos,m){
 
 function recordMove(san){
   moveHistory.push(san);
-  const el=document.getElementById('move-list');
-  el.innerHTML='';
+  const el=document.getElementById('move-list');el.innerHTML='';
   for(let i=0;i<moveHistory.length;i+=2){
     const num=Math.floor(i/2)+1;
     let html='<span class="move-num">'+num+'.</span>';
@@ -1339,10 +1026,8 @@ function recordMove(san){
 }
 
 function renderPlayBoard(){
-  const el=document.getElementById('board');
-  el.innerHTML='';
-  const pos=gamePos;
-  const lm=legalMovesCache;
+  const el=document.getElementById('board');el.innerHTML='';
+  const pos=gamePos,lm=legalMovesCache;
   const showCoords=document.getElementById('tog-coords').checked;
   let heatField=null;
   if(showHeatmap&&engineWeights){
@@ -1351,17 +1036,14 @@ function renderPlayBoard(){
       if(!pos.board[sq])continue;
       const apc=Math.abs(pos.board[sq]),color=Math.sign(pos.board[sq]);
       const fi=xrayMobility(apc,sq,color);
-      for(let t=0;t<64;t++){
-        heatField[t]+=fi*color*GREEN[t*64+sq];
-      }
+      for(let t=0;t<64;t++)heatField[t]+=fi*color*GREEN[t*64+sq];
     }
   }
 
   for(let vi=0;vi<64;vi++){
     const r=boardFlipped?(vi>>3):7-(vi>>3);
     const f=boardFlipped?7-(vi&7):(vi&7);
-    const sq=r*8+f;
-    const div=document.createElement('div');
+    const sq=r*8+f,div=document.createElement('div');
     div.className='sq '+((r+f)%2?'dark':'light');
     if(sq===selectedSq)div.classList.add('selected');
     if(lastMove&&(sq===lastMove.from||sq===lastMove.to))div.classList.add('last-move');
@@ -1369,20 +1051,16 @@ function renderPlayBoard(){
       &&Math.sign(pos.board[sq])===pos.turn)div.classList.add('check');
 
     if(heatField&&heatField[sq]){
-      const v=heatField[sq];
-      const hue=v>0?120:0;
-      const sat=70,light=50;
-      const ov=document.createElement('div');
-      ov.className='heat-overlay';
-      ov.style.background='hsla('+hue+','+sat+'%,'+light+'%,'+Math.min(0.6,Math.abs(v)/2.5)+')';
+      const v=heatField[sq],hue=v>0?120:0;
+      const ov=document.createElement('div');ov.className='heat-overlay';
+      ov.style.background='hsla('+hue+',70%,50%,'+Math.min(0.6,Math.abs(v)/2.5)+')';
       div.appendChild(ov);
     }
 
     if(pos.board[sq]){
       const s=document.createElement('span');
       s.className='piece '+(Math.sign(pos.board[sq])===WHITE?'white-piece':'black-piece');
-      s.textContent=PIECE_CHAR[pos.board[sq]];
-      div.appendChild(s);
+      s.textContent=PIECE_CHAR[pos.board[sq]];div.appendChild(s);
     }
 
     if(selectedSq>=0){
@@ -1407,53 +1085,39 @@ function renderPlayBoard(){
 function squareClicked(sq){
   if(gameOver||pendingPromo)return;
   if(gamePos.turn!==playerColor)return;
-
   if(selectedSq>=0){
     const target=legalMovesCache.filter(m=>m.to===sq);
     if(target.length){
-      if(target.length>1&&target[0].promo){
-        showPromoDialog(sq,target);
-        return;
-      }
-      executePlayerMove(target[0]);
-      return;
+      if(target.length>1&&target[0].promo){showPromoDialog(sq,target);return;}
+      executePlayerMove(target[0]);return;
     }
   }
-
   if(gamePos.board[sq]&&Math.sign(gamePos.board[sq])===playerColor){
     selectedSq=sq;
     legalMovesCache=gamePos.legalMoves().filter(m=>m.from===sq);
     renderPlayBoard();
   }else{
-    selectedSq=-1;legalMovesCache=[];
-    renderPlayBoard();
+    selectedSq=-1;legalMovesCache=[];renderPlayBoard();
   }
 }
 
 function showPromoDialog(toSq,moves){
   pendingPromo={toSq,moves};
-  const board=document.getElementById('board');
-  const rect=board.getBoundingClientRect();
+  const board=document.getElementById('board'),rect=board.getBoundingClientRect();
   const sqSize=rect.width/8;
   const f=boardFlipped?7-(toSq&7):(toSq&7);
   const vr=boardFlipped?(toSq>>3):7-(toSq>>3);
-
   const modal=document.createElement('div');
-  modal.className='promo-modal';
-  modal.style.position='fixed';
+  modal.className='promo-modal';modal.style.position='fixed';
   modal.style.left=(rect.left+f*sqSize)+'px';
   modal.style.top=(rect.top+vr*sqSize)+'px';
   modal.style.width=sqSize+'px';
-
-  const pieces=playerColor===WHITE?[QUEEN,ROOK,BISHOP,KNIGHT]:[QUEEN,ROOK,BISHOP,KNIGHT];
-  for(const p of pieces){
-    const opt=document.createElement('div');
-    opt.className='promo-option';
+  for(const p of[QUEEN,ROOK,BISHOP,KNIGHT]){
+    const opt=document.createElement('div');opt.className='promo-option';
     opt.textContent=PIECE_CHAR[p*playerColor];
     opt.onclick=()=>{
       const m=moves.find(m=>m.promo===p);
-      document.body.removeChild(modal);
-      pendingPromo=null;
+      document.body.removeChild(modal);pendingPromo=null;
       executePlayerMove(m);
     };
     modal.appendChild(opt);
@@ -1463,11 +1127,8 @@ function showPromoDialog(toSq,moves){
 
 function executePlayerMove(m){
   const san=moveToSAN(gamePos,m);
-  gamePos.makeMove(m);
-  lastMove=m;selectedSq=-1;legalMovesCache=[];
-  recordMove(san);
-  renderPlayBoard();
-  // Quick eval from engine's perspective after player's move
+  gamePos.makeMove(m);lastMove=m;selectedSq=-1;legalMovesCache=[];
+  recordMove(san);renderPlayBoard();
   lastSearchScore=evalPos(gamePos,engineWeights);
   updateDashboard();
   if(checkGameEnd())return;
@@ -1481,12 +1142,9 @@ async function aiMove(){
   if(!m){checkGameEnd();return;}
   lastSearchScore=m.score||0;
   const san=moveToSAN(gamePos,m);
-  gamePos.makeMove(m);
-  lastMove=m;
-  recordMove(san);
-  renderPlayBoard();
-  updateDashboard();
-  checkGameEnd();
+  gamePos.makeMove(m);lastMove=m;
+  recordMove(san);renderPlayBoard();
+  updateDashboard();checkGameEnd();
 }
 
 function checkGameEnd(){
@@ -1496,16 +1154,11 @@ function checkGameEnd(){
     if(gamePos.inCheck()){
       const winner=gamePos.turn===WHITE?'Black':'White';
       setStatus('Checkmate! '+winner+' wins.');
-    }else{
-      setStatus('Stalemate. Draw.');
-    }
+    }else setStatus('Stalemate. Draw.');
     return true;
   }
-  if(gamePos.halfmove>=100){
-    gameOver=true;setStatus('Draw by 50-move rule.');return true;
-  }
-  setStatus('');
-  return false;
+  if(gamePos.halfmove>=100){gameOver=true;setStatus('Draw by 50-move rule.');return true;}
+  setStatus('');return false;
 }
 
 function undoMove(){
@@ -1513,9 +1166,8 @@ function undoMove(){
   gamePos.unmakeMove();gamePos.unmakeMove();
   moveHistory.pop();moveHistory.pop();
   lastMove=gamePos.hist.length?gamePos.hist[gamePos.hist.length-1]:null;
-  selectedSq=-1;legalMovesCache=[];gameOver=false;
-  const el=document.getElementById('move-list');
-  el.innerHTML='';
+  selectedSq=-1;legalMovesCache=[];gameOver=false;lastSearchScore=0;
+  const el=document.getElementById('move-list');el.innerHTML='';
   for(let i=0;i<moveHistory.length;i+=2){
     const num=Math.floor(i/2)+1;
     let html='<span class="move-num">'+num+'.</span><span class="move-w">'+moveHistory[i]+'</span>';
@@ -1527,21 +1179,45 @@ function undoMove(){
 
 function setStatus(s){document.getElementById('game-status').textContent=s;}
 
+// =========================================================================
+//  DASHBOARD
+//  Displays all thermodynamic quantities computed from the partition function.
+//  Temperature T is MEASURED from the position — it is not adjustable.
+// =========================================================================
 function updateDashboard(){
   if(!engineWeights)return;
 
+  // Internal energy (ideal gas)
   const {Uw,Ub}=engineWeights.rawU(gamePos);
   document.getElementById('td-Uw').textContent=Uw.toFixed(0);
   document.getElementById('td-Ub').textContent=Ub.toFixed(0);
 
-  const thermo=softMinimax(gamePos,thermoDepth,thermoT,engineWeights);
-  const Fabs=gamePos.turn===WHITE?thermo.value:-thermo.value;
+  // Compute thermodynamic state from partition function
+  const thermo=computeThermodynamics(gamePos,thermoDepth,engineWeights);
 
-  document.getElementById('td-F').textContent=Fabs.toFixed(1);
-  document.getElementById('td-S').textContent=thermo.entropy.toFixed(3);
-  document.getElementById('td-C').textContent=thermo.heat.toFixed(3);
-  document.getElementById('td-T').textContent=thermoT.toFixed(1);
+  // Temperature (calculated from continuation spread)
+  document.getElementById('td-T').textContent=thermo.T.toFixed(2);
+  document.getElementById('td-beta').textContent=
+    Number.isFinite(thermo.beta)?thermo.beta.toFixed(3):'∞';
 
+  // Partition function
+  if(Number.isFinite(thermo.Z)){
+    document.getElementById('td-Z').textContent=
+      thermo.Z>1e6?thermo.Z.toExponential(2):thermo.Z.toFixed(2);
+  }else{
+    document.getElementById('td-Z').textContent='-';
+  }
+
+  // Free energy F = T ln Z (converted to White's perspective)
+  const Fwhite=gamePos.turn===WHITE?thermo.F:-thermo.F;
+  document.getElementById('td-F').textContent=
+    Number.isFinite(Fwhite)?Fwhite.toFixed(1):'-';
+
+  // Continuation entropy and specific heat
+  document.getElementById('td-S').textContent=thermo.S.toFixed(3);
+  document.getElementById('td-C').textContent=thermo.C.toFixed(3);
+
+  // Chemical potentials
   const mu=computeChemicalPotentials(gamePos,engineWeights);
   let muStr='';
   for(const [k,v] of Object.entries(mu)){
@@ -1549,10 +1225,9 @@ function updateDashboard(){
   }
   document.getElementById('td-mu').textContent=muStr.trim()||'-';
 
-  // Eval bar uses the engine's actual alpha-beta search score (from
-  // Black's perspective since engine plays Black). Convert to White's
-  // perspective and normalize to pawn units.
-  const searchE=-lastSearchScore/PAWN_XRAY;
+  // Eval bar: uses alpha-beta search score, clamped to prevent Infinity
+  const rawE=-lastSearchScore/PAWN_XRAY;
+  const searchE=Number.isFinite(rawE)?Math.max(-99,Math.min(99,rawE)):0;
   document.getElementById('td-E').textContent=searchE.toFixed(2);
   const pct=100/(1+Math.exp(-searchE));
   document.getElementById('eval-fill').style.width=Math.max(2,Math.min(98,pct))+'%';
@@ -1574,8 +1249,7 @@ function startEvo(mode){
     const G=v<=100?2:v<=1000?3:4;
     return runEvolution({K,G,gens:v});
   }
-  const c=configs[mode]||configs.standard;
-  runEvolution(c);
+  runEvolution(configs[mode]||configs.standard);
 }
 
 (function init(){

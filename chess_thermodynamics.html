@@ -605,7 +605,7 @@ const TT_SZ=1<<20,TT_EX=0,TT_AL=1,TT_BE=2;
 let ttab=new Array(TT_SZ).fill(null);
 function ttClear(){ttab.fill(null);}
 function ttGet(h){const e=ttab[(h>>>0)%TT_SZ];return(e&&e.h===h)?e:null;}
-function ttPut(h,d,s,f,bm){const i=(h>>>0)%TT_SZ;const e=ttab[i];if(!e||d>=e.d)ttab[i]={h,d,s,f,bm};}
+function ttPut(h,d,s,f,bm){if(!Number.isFinite(s))return;const i=(h>>>0)%TT_SZ;const e=ttab[i];if(!e||d>=e.d)ttab[i]={h,d,s,f,bm};}
 
 const MAX_PLY=64;
 const killers=Array.from({length:MAX_PLY},()=>[null,null]);
@@ -679,7 +679,7 @@ function searchAB(pos,depth,alpha,beta,ind,ply,nullOk){
 
   const inCheck=pos.inCheck();
 
-  if(nullOk&&!inCheck&&depth>=3&&ply>0){
+  if(nullOk&&!inCheck&&depth>=3&&ply>0&&Number.isFinite(beta)){
     const savedTurn=pos.turn,savedEp=pos.ep;
     pos.turn=-pos.turn;pos.ep=-1;
     const ns=-searchAB(pos,depth-3,-beta,-beta+1,ind,ply+1,false);
@@ -1147,7 +1147,7 @@ async function aiMove(){
   ttClear();
   const m=bestMoveID(gamePos,engineWeights,20,thinkNodes);
   if(!m){checkGameEnd();return;}
-  lastSearchScore=m.score||0;
+  lastSearchScore=Number.isFinite(m.score)?m.score:evalPos(gamePos,engineWeights);
   const san=moveToSAN(gamePos,m);
   gamePos.makeMove(m);lastMove=m;
   recordMove(san);renderPlayBoard();

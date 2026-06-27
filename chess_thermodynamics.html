@@ -156,7 +156,7 @@ select{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:6px 10p
           <div class="thermo-item"><label>S (entropy)</label><span id="td-S">-</span></div>
           <div class="thermo-item"><label>C (spec. heat)</label><span id="td-C">-</span></div>
           <div class="thermo-item"><label>Eval (pawns)</label><span id="td-E">-</span></div>
-          <div class="thermo-item" style="grid-column:span 2"><label>&mu; imbalance</label><span id="td-mu">-</span></div>
+          <div class="thermo-item" style="grid-column:span 2"><label>&mu; = &part;F/&part;N |<sub>T</sub> (pawns)</label><span id="td-mu">-</span></div>
         </div>
       </div>
       <div class="move-list-wrap">
@@ -466,24 +466,18 @@ let thermoDepth=2;
 function setThermoDepth(v){thermoDepth=parseInt(v);updateDashboard();}
 
 // =========================================================================
-//  INDIVIDUAL (EVOLVABLE CHEMICAL POTENTIALS)
-//  Leaf evaluator = ideal gas: U = sum mu_type * xray_mobility(piece)
+//  INDIVIDUAL
+//  Leaf evaluator = ideal gas: U = sum xray_mobility(piece), no weights
 // =========================================================================
 class Individual{
-  constructor(){
-    this.pieceW=new Float64Array(7);
-    this.pieceW[PAWN]=1.0;this.pieceW[KNIGHT]=1.0;this.pieceW[BISHOP]=1.0;
-    this.pieceW[ROOK]=1.0;this.pieceW[QUEEN]=1.0;this.pieceW[KING]=1.0;
-    this.fitness=0;
-  }
+  constructor(){this.fitness=0;}
   leafEval(pos){
     let Uw=0,Ub=0;
     for(let sq=0;sq<64;sq++){
       if(!pos.board[sq])continue;
       const apc=Math.abs(pos.board[sq]),color=Math.sign(pos.board[sq]);
       const fi=xrayMobility(apc,sq,color);
-      if(color===WHITE)Uw+=this.pieceW[apc]*fi;
-      else Ub+=this.pieceW[apc]*fi;
+      if(color===WHITE)Uw+=fi; else Ub+=fi;
     }
     return pos.turn===WHITE?(Uw-Ub):(Ub-Uw);
   }
@@ -496,18 +490,11 @@ class Individual{
     }
     return {Uw,Ub};
   }
-  clone(){
-    const c=new Individual();c.pieceW.set(this.pieceW);c.fitness=this.fitness;return c;
-  }
+  clone(){const c=new Individual();c.fitness=this.fitness;return c;}
 }
 
 function createSeeded(){return new Individual();}
-
-function createRandom(){
-  const ind=new Individual();
-  for(let i=1;i<=6;i++)ind.pieceW[i]=0.5+Math.random()*1.5;
-  return ind;
-}
+function createRandom(){return new Individual();}
 
 function evalPos(pos,ind){return ind.leafEval(pos);}
 
@@ -581,18 +568,33 @@ function computeThermodynamics(pos,depth,ind){
   return {T,beta,Z,logZ,F,S,C,meanQ,TS,probs,moves,vals};
 }
 
-// Chemical potentials: per-piece-type weighted xray contribution
-function computeChemicalPotentials(pos,ind){
+// Chemical potentials: mu_i = (F - F') + S*(T' - T)
+// where primed = piece removed, measured from White's perspective
+function computeChemicalPotentials(pos,depth,ind,thermo){
   const names={1:'P',2:'N',3:'B',4:'R',5:'Q',6:'K'};
+  const sign=pos.turn===WHITE?1:-1;
+  const F0=sign*thermo.F;
+  const T0=thermo.T;
+  const S0=thermo.S;
   const result={};
-  for(const v of Object.values(names))result[v]={w:0,b:0,nw:0,nb:0};
+  for(const v of Object.values(names))result[v]={w:null,b:null};
+  const seen={};
   for(let sq=0;sq<64;sq++){
     if(!pos.board[sq])continue;
     const apc=Math.abs(pos.board[sq]),color=Math.sign(pos.board[sq]);
-    const fi=xrayMobility(apc,sq,color)*ind.pieceW[apc];
+    const key=apc*10+color;
+    if(seen[key])continue;
+    seen[key]=true;
+    const saved=pos.board[sq];
+    pos.board[sq]=0;
+    const th1=computeThermodynamics(pos,depth,ind);
+    const F1=sign*th1.F;
+    const T1=th1.T;
+    pos.board[sq]=saved;
+    const mu=(F0-F1)+S0*(T1-T0);
     const name=names[apc];
-    if(color===WHITE){result[name].w+=fi;result[name].nw++;}
-    else{result[name].b+=fi;result[name].nb++;}
+    if(color===WHITE)result[name].w=mu;
+    else result[name].b=mu;
   }
   return result;
 }
@@ -833,14 +835,7 @@ function evolvePop(pop,gen,totalGens){
   const newPop=[];
   for(let i=0;i<eliteCount;i++)newPop.push(pop[i].clone());
   while(newPop.length<K){
-    const p1=pop[Math.floor(Math.random()*eliteCount)];
-    const p2=pop[Math.floor(Math.random()*Math.ceil(K*0.5))];
     const child=new Individual();
-    for(let i=1;i<=6;i++)child.pieceW[i]=Math.random()<0.5?p1.pieceW[i]:p2.pieceW[i];
-    for(let i=1;i<=6;i++){
-      if(Math.random()<0.3)child.pieceW[i]+=gaussRand()*0.2*mutScale;
-      child.pieceW[i]=Math.max(0.01,child.pieceW[i]);
-    }
     child.fitness=0;
     newPop.push(child);
   }
@@ -877,10 +872,7 @@ async function runEvolution(config){
     evoPop=evolvePop(evoPop,gen,gens);
     evoFitnessHistory.push(evoPop[0].fitness);
     updateEvoUI();drawFitnessChart();
-    const bw=evoPop[0].pieceW;
-    log('Gen '+(gen+1)+': fit='+evoPop[0].fitness.toFixed(1)+
-      ' μ=[P'+bw[PAWN].toFixed(2)+' N'+bw[KNIGHT].toFixed(2)+' B'+bw[BISHOP].toFixed(2)+
-      ' R'+bw[ROOK].toFixed(2)+' Q'+bw[QUEEN].toFixed(2)+']');
+    log('Gen '+(gen+1)+': fit='+evoPop[0].fitness.toFixed(1));
     await yieldFrame();
   }
 
@@ -910,10 +902,7 @@ function updateEvoUI(){
   document.getElementById('st-gen').textContent=(evoGen+1)+' / '+gens;
   document.getElementById('st-games').textContent=evoTotalGames;
   document.getElementById('st-fit').textContent=best.fitness.toFixed(1);
-  const pw=best.pieceW;
-  document.getElementById('st-pw').textContent=
-    'P'+pw[PAWN].toFixed(2)+' N'+pw[KNIGHT].toFixed(2)+' B'+pw[BISHOP].toFixed(2)+
-    ' R'+pw[ROOK].toFixed(2)+' Q'+pw[QUEEN].toFixed(2);
+  document.getElementById('st-pw').textContent='-';
   document.getElementById('evo-prog').style.width=(gens?((evoGen+1)/gens*100):0)+'%';
 }
 
@@ -1231,11 +1220,14 @@ function updateDashboard(){
   document.getElementById('td-S').textContent=thermo.S.toFixed(3);
   document.getElementById('td-C').textContent=thermo.C.toFixed(3);
 
-  // Chemical potentials
-  const mu=computeChemicalPotentials(gamePos,engineWeights);
+  // Chemical potentials: derived from dF/dN corrected for dT/dN
+  const mu=computeChemicalPotentials(gamePos,thermoDepth,engineWeights,thermo);
   let muStr='';
   for(const [k,v] of Object.entries(mu)){
-    if(v.nw+v.nb>0)muStr+=k+':'+(v.w-v.b).toFixed(1)+' ';
+    if(v.w!==null){
+      const pawns=v.w/PAWN_XRAY;
+      muStr+=k+':'+(pawns>=0?'+':'')+pawns.toFixed(1)+' ';
+    }
   }
   document.getElementById('td-mu').textContent=muStr.trim()||'-';
 

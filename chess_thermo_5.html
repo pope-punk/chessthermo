@@ -1483,8 +1483,9 @@ function doAiMove() {
         let timedOut = false;
         pathKeys.clear(); pathKeys.add(rootHash);
         for (let i = 0; i < n; i++) {
+            const kx = moves[i].piece === 'k' && KING_EXT > 0;
             game.fast_make(moves[i]);
-            Qs[i] = -thermoSearch(game, depth - 1, pathKeys);
+            Qs[i] = -thermoSearch(game, kx ? depth : depth - 1, pathKeys, kx ? KING_EXT - 1 : KING_EXT);
             game.fast_undo();
             if (performance.now() > deadline) { timedOut = true; break; }
         }

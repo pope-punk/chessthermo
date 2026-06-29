@@ -1,0 +1,1835 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chess Thermodynamics Engine</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: #0f0f1a;
+    color: #e0e0e0;
+    min-height: 100vh;
+}
+#app {
+    display: flex;
+    max-width: 1400px;
+    margin: 0 auto;
+    gap: 24px;
+    padding: 20px;
+    align-items: flex-start;
+}
+#left-panel { flex: 0 0 auto; }
+#right-panel {
+    flex: 1;
+    min-width: 310px;
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
+}
+h1 { font-size: 1.4em; margin-bottom: 10px; color: #7ec8e3; }
+h2 {
+    font-size: 1.05em;
+    margin: 14px 0 6px;
+    color: #7ec8e3;
+    border-bottom: 1px solid #2a2a3e;
+    padding-bottom: 4px;
+}
+.h2-sub {
+    font-size: 0.75em;
+    color: #666;
+    font-weight: normal;
+    display: block;
+    margin-top: 2px;
+}
+#status {
+    margin-bottom: 10px;
+    padding: 8px 12px;
+    background: #16213e;
+    border-radius: 6px;
+    font-size: 0.9em;
+    min-height: 36px;
+}
+#board-container {
+    display: inline-block;
+    border: 2px solid #3a3a5e;
+    border-radius: 4px;
+    overflow: hidden;
+}
+.board-row { display: flex; }
+.cell {
+    width: 68px; height: 68px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 46px; cursor: pointer; user-select: none;
+    position: relative; transition: opacity 0.1s;
+    color: #1a1a1a; text-shadow: 0 0 2px rgba(0,0,0,0.3);
+}
+.light { background: #f0d9b5; }
+.dark { background: #b58863; }
+.cell:hover { opacity: 0.88; }
+.cell.selected { box-shadow: inset 0 0 0 3.5px #3355dd; }
+.cell.legal-dot::after {
+    content: ''; position: absolute;
+    width: 20px; height: 20px;
+    background: rgba(0,0,0,0.22); border-radius: 50%;
+    top: 50%; left: 50%; transform: translate(-50%,-50%);
+    pointer-events: none;
+}
+.cell.legal-capture { box-shadow: inset 0 0 0 4px rgba(0,0,0,0.22); }
+.light.last-move { background: #cdd26a; }
+.dark.last-move { background: #aaa23a; }
+.light.last-move.selected { background: #cdd26a; box-shadow: inset 0 0 0 3.5px #3355dd; }
+.dark.last-move.selected { background: #aaa23a; box-shadow: inset 0 0 0 3.5px #3355dd; }
+.coord-label { font-size: 10px; position: absolute; pointer-events: none; font-weight: 600; }
+.file-label { bottom: 2px; right: 4px; }
+.rank-label { top: 2px; left: 4px; }
+.light .coord-label { color: #b58863; }
+.dark .coord-label { color: #f0d9b5; }
+#controls {
+    margin-top: 10px; display: flex; gap: 8px;
+    flex-wrap: wrap; align-items: center;
+}
+button, select {
+    padding: 6px 12px; background: #16213e; color: #e0e0e0;
+    border: 1px solid #3a3a5e; border-radius: 5px;
+    cursor: pointer; font-size: 0.85em; font-family: inherit;
+}
+button:hover { background: #1e3050; }
+select:focus, button:focus { outline: 1px solid #7ec8e3; }
+input[type="range"] {
+    width: 80px; vertical-align: middle; accent-color: #7ec8e3;
+    cursor: pointer; margin: 0 4px;
+}
+#heatCapVal { font-family: 'Consolas','Menlo',monospace; font-size: 0.85em; color: #7ec8e3; min-width: 2em; display: inline-block; }
+label { font-size: 0.85em; }
+#move-list {
+    margin-top: 10px; padding: 8px 10px;
+    background: #16213e; border-radius: 6px;
+    font-family: 'Consolas','Menlo',monospace; font-size: 0.84em;
+    max-height: 110px; overflow-y: auto;
+    line-height: 1.7; word-wrap: break-word;
+}
+.dash-section {
+    background: #16213e; border-radius: 6px;
+    padding: 10px 12px; margin-bottom: 8px;
+}
+.dash-grid {
+    display: grid;
+    grid-template-columns: auto 1fr auto 1fr;
+    gap: 3px 10px;
+    font-family: 'Consolas','Menlo',monospace; font-size: 0.84em;
+    align-items: baseline;
+}
+.dash-label { color: #999; white-space: nowrap; }
+.dash-value { color: #7ec8e3; text-align: right; font-variant-numeric: tabular-nums; }
+.prob-table {
+    width: 100%; border-collapse: collapse;
+    font-family: 'Consolas','Menlo',monospace; font-size: 0.8em;
+}
+.prob-table th {
+    text-align: left; color: #888; padding: 2px 6px;
+    border-bottom: 1px solid #2a2a3e; font-weight: normal;
+}
+.prob-table td { padding: 2px 6px; }
+.prob-bar-cell { width: 35%; }
+.prob-bar {
+    height: 13px;
+    background: linear-gradient(90deg, #7ec8e3, #5ba3c0);
+    border-radius: 2px; min-width: 2px;
+}
+.best-move-row td { color: #c8e37e; }
+#promotion-modal {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7); z-index: 100;
+    align-items: center; justify-content: center;
+}
+#promotion-modal.active { display: flex; }
+.promo-choices {
+    display: flex; gap: 10px; background: #16213e;
+    padding: 18px; border-radius: 10px; border: 2px solid #7ec8e3;
+}
+.promo-piece {
+    width: 68px; height: 68px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 50px; cursor: pointer;
+    background: #f0d9b5; border-radius: 6px; transition: transform 0.1s;
+}
+.promo-piece:hover { transform: scale(1.08); background: #e0c9a5; }
+.graph-controls {
+    display: flex; gap: 8px; align-items: center; margin-bottom: 8px;
+}
+.graph-controls select { padding: 3px 8px; font-size: 0.8em; }
+#graph-canvas { width: 100%; height: 150px; display: block; }
+@media (max-width: 960px) {
+    #app { flex-direction: column; align-items: center; }
+    #right-panel { min-width: unset; width: 100%; max-width: 560px; max-height: unset; }
+}
+@media (max-width: 600px) {
+    .cell { width: 48px; height: 48px; font-size: 32px; }
+    #app { padding: 10px; gap: 12px; }
+}
+</style>
+</head>
+<body>
+
+<div id="app">
+<div id="left-panel">
+    <h1>&#9812; Chess Thermodynamics</h1>
+    <div id="status">Your move (White)</div>
+    <div id="board-container"><div id="board"></div></div>
+    <div id="controls">
+        <button onclick="newGame()">New Game</button>
+        <button onclick="undoMove()">Undo</button>
+        <button onclick="flipBoard()">Flip</button>
+        <button onclick="switchSides()">Switch Sides</button>
+        <select id="difficulty">
+            <option value="easy">Easy (10K)</option>
+            <option value="medium" selected>Medium (50K)</option>
+            <option value="hard">Hard (200K)</option>
+            <option value="max">Max (1M)</option>
+        </select>
+        <label>Depth:
+            <select id="dashDepth" onchange="updateDashboard()">
+                <option value="1" selected>1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+            </select>
+        </label>
+        <label>C: <input type="range" id="heatCap" min="0.5" max="5" step="0.1" value="1.0"
+            oninput="onHeatCapChange(this.value)"><span id="heatCapVal">1.0</span>
+        </label>
+    </div>
+    <div id="move-list">Game start</div>
+</div>
+
+<div id="right-panel">
+    <h2>Thermodynamic State
+        <span class="h2-sub">Q = &minus;E convention; F maximized</span>
+    </h2>
+    <div id="dash-thermo" class="dash-section"><div class="dash-grid" id="thermo-grid"></div></div>
+
+    <h2>&mu;<sub>P</sub> = F &minus; F<sub>&minus;P</sub>
+        <span class="h2-sub">Exact free-energy cost of removing piece P from the partition function</span>
+    </h2>
+    <div id="dash-chempot" class="dash-section"></div>
+
+    <h2>Evaluation Weights &pi;<sub>a</sub>
+        <span class="h2-sub">Engine plays argmax Q; weights show competitive moves</span>
+    </h2>
+    <div id="dash-moves" class="dash-section" style="max-height:320px;overflow-y:auto"></div>
+
+    <h2>History</h2>
+    <div class="dash-section">
+        <div class="graph-controls">
+            <select id="graphVar" onchange="renderGraph()">
+                <option value="eval" selected>Eval (&pawn;)</option>
+                <option value="T">T</option>
+                <option value="S">S</option>
+            </select>
+        </div>
+        <canvas id="graph-canvas"></canvas>
+    </div>
+</div>
+</div>
+
+<div id="promotion-modal"><div class="promo-choices" id="promo-choices"></div></div>
+
+<script>
+/* ================================================================
+ * chess.js v0.10.3 (c) Jeff Hlywa, BSD license
+ * Modified: castling[us]=0 (was ''), fast_hash, generate_captures
+ * ================================================================ */
+var Chess = function(fen) {
+  var BLACK = 'b', WHITE = 'w', EMPTY = -1;
+  var PAWN = 'p', KNIGHT = 'n', BISHOP = 'b', ROOK = 'r', QUEEN = 'q', KING = 'k';
+  var SYMBOLS = 'pnbrqkPNBRQK';
+  var DEFAULT_POSITION = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+  var POSSIBLE_RESULTS = ['1-0', '0-1', '1/2-1/2', '*'];
+  var PAWN_OFFSETS = { b: [16, 32, 17, 15], w: [-16, -32, -17, -15] };
+  var PIECE_OFFSETS = {
+    n: [-18, -33, -31, -14, 18, 33, 31, 14],
+    b: [-17, -15, 17, 15], r: [-16, 1, 16, -1],
+    q: [-17, -16, -15, 1, 17, 16, 15, -1],
+    k: [-17, -16, -15, 1, 17, 16, 15, -1]
+  };
+  var ATTACKS = [
+    20, 0, 0, 0, 0, 0, 0, 24, 0, 0, 0, 0, 0, 0,20, 0,
+     0,20, 0, 0, 0, 0, 0, 24, 0, 0, 0, 0, 0,20, 0, 0,
+     0, 0,20, 0, 0, 0, 0, 24, 0, 0, 0, 0,20, 0, 0, 0,
+     0, 0, 0,20, 0, 0, 0, 24, 0, 0, 0,20, 0, 0, 0, 0,
+     0, 0, 0, 0,20, 0, 0, 24, 0, 0,20, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0,20, 2, 24, 2,20, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 2,53, 56,53, 2, 0, 0, 0, 0, 0, 0,
+    24,24,24,24,24,24,56,  0,56,24,24,24,24,24,24, 0,
+     0, 0, 0, 0, 0, 2,53, 56,53, 2, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0,20, 2, 24, 2,20, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0,20, 0, 0, 24, 0, 0,20, 0, 0, 0, 0, 0,
+     0, 0, 0,20, 0, 0, 0, 24, 0, 0, 0,20, 0, 0, 0, 0,
+     0, 0,20, 0, 0, 0, 0, 24, 0, 0, 0, 0,20, 0, 0, 0,
+     0,20, 0, 0, 0, 0, 0, 24, 0, 0, 0, 0, 0,20, 0, 0,
+    20, 0, 0, 0, 0, 0, 0, 24, 0, 0, 0, 0, 0, 0,20
+  ];
+  var RAYS = [
+     17,  0,  0,  0,  0,  0,  0, 16,  0,  0,  0,  0,  0,  0, 15, 0,
+      0, 17,  0,  0,  0,  0,  0, 16,  0,  0,  0,  0,  0, 15,  0, 0,
+      0,  0, 17,  0,  0,  0,  0, 16,  0,  0,  0,  0, 15,  0,  0, 0,
+      0,  0,  0, 17,  0,  0,  0, 16,  0,  0,  0, 15,  0,  0,  0, 0,
+      0,  0,  0,  0, 17,  0,  0, 16,  0,  0, 15,  0,  0,  0,  0, 0,
+      0,  0,  0,  0,  0, 17,  0, 16,  0, 15,  0,  0,  0,  0,  0, 0,
+      0,  0,  0,  0,  0,  0, 17, 16, 15,  0,  0,  0,  0,  0,  0, 0,
+      1,  1,  1,  1,  1,  1,  1,  0, -1, -1, -1,-1, -1, -1, -1, 0,
+      0,  0,  0,  0,  0,  0,-15,-16,-17,  0,  0,  0,  0,  0,  0, 0,
+      0,  0,  0,  0,  0,-15,  0,-16,  0,-17,  0,  0,  0,  0,  0, 0,
+      0,  0,  0,  0,-15,  0,  0,-16,  0,  0,-17,  0,  0,  0,  0, 0,
+      0,  0,  0,-15,  0,  0,  0,-16,  0,  0,  0,-17,  0,  0,  0, 0,
+      0,  0,-15,  0,  0,  0,  0,-16,  0,  0,  0,  0,-17,  0,  0, 0,
+      0,-15,  0,  0,  0,  0,  0,-16,  0,  0,  0,  0,  0,-17,  0, 0,
+    -15,  0,  0,  0,  0,  0,  0,-16,  0,  0,  0,  0,  0,  0,-17
+  ];
+  var SHIFTS = { p: 0, n: 1, b: 2, r: 3, q: 4, k: 5 };
+  var FLAGS = { NORMAL:'n', CAPTURE:'c', BIG_PAWN:'b', EP_CAPTURE:'e', PROMOTION:'p', KSIDE_CASTLE:'k', QSIDE_CASTLE:'q' };
+  var BITS = { NORMAL:1, CAPTURE:2, BIG_PAWN:4, EP_CAPTURE:8, PROMOTION:16, KSIDE_CASTLE:32, QSIDE_CASTLE:64 };
+  var RANK_1=7, RANK_2=6, RANK_7=1, RANK_8=0;
+  var SQUARES = {
+    a8:0,b8:1,c8:2,d8:3,e8:4,f8:5,g8:6,h8:7,
+    a7:16,b7:17,c7:18,d7:19,e7:20,f7:21,g7:22,h7:23,
+    a6:32,b6:33,c6:34,d6:35,e6:36,f6:37,g6:38,h6:39,
+    a5:48,b5:49,c5:50,d5:51,e5:52,f5:53,g5:54,h5:55,
+    a4:64,b4:65,c4:66,d4:67,e4:68,f4:69,g4:70,h4:71,
+    a3:80,b3:81,c3:82,d3:83,e3:84,f3:85,g3:86,h3:87,
+    a2:96,b2:97,c2:98,d2:99,e2:100,f2:101,g2:102,h2:103,
+    a1:112,b1:113,c1:114,d1:115,e1:116,f1:117,g1:118,h1:119
+  };
+  var ROOKS = {
+    w: [{square:SQUARES.a1,flag:BITS.QSIDE_CASTLE},{square:SQUARES.h1,flag:BITS.KSIDE_CASTLE}],
+    b: [{square:SQUARES.a8,flag:BITS.QSIDE_CASTLE},{square:SQUARES.h8,flag:BITS.KSIDE_CASTLE}]
+  };
+  var board = new Array(128);
+  var kings = { w: EMPTY, b: EMPTY };
+  var turn = WHITE;
+  var castling = { w: 0, b: 0 };
+  var ep_square = EMPTY;
+  var half_moves = 0;
+  var move_number = 1;
+  var history = [];
+  var header = {};
+  if (typeof fen === 'undefined') load(DEFAULT_POSITION); else load(fen);
+
+  function clear(keep_headers) {
+    if (typeof keep_headers === 'undefined') keep_headers = false;
+    board = new Array(128); kings = { w: EMPTY, b: EMPTY };
+    turn = WHITE; castling = { w: 0, b: 0 }; ep_square = EMPTY;
+    half_moves = 0; move_number = 1; history = [];
+    if (!keep_headers) header = {};
+    update_setup(generate_fen());
+  }
+  function reset() { load(DEFAULT_POSITION); }
+  function load(fen, keep_headers) {
+    if (typeof keep_headers === 'undefined') keep_headers = false;
+    var tokens = fen.split(/\s+/); var position = tokens[0]; var square = 0;
+    if (!validate_fen(fen).valid) return false;
+    clear(keep_headers);
+    for (var i = 0; i < position.length; i++) {
+      var piece = position.charAt(i);
+      if (piece === '/') { square += 8; }
+      else if (is_digit(piece)) { square += parseInt(piece, 10); }
+      else {
+        var color = piece < 'a' ? WHITE : BLACK;
+        put({ type: piece.toLowerCase(), color: color }, algebraic(square)); square++;
+      }
+    }
+    turn = tokens[1];
+    if (tokens[2].indexOf('K') > -1) castling.w |= BITS.KSIDE_CASTLE;
+    if (tokens[2].indexOf('Q') > -1) castling.w |= BITS.QSIDE_CASTLE;
+    if (tokens[2].indexOf('k') > -1) castling.b |= BITS.KSIDE_CASTLE;
+    if (tokens[2].indexOf('q') > -1) castling.b |= BITS.QSIDE_CASTLE;
+    ep_square = tokens[3] === '-' ? EMPTY : SQUARES[tokens[3]];
+    half_moves = parseInt(tokens[4], 10); move_number = parseInt(tokens[5], 10);
+    update_setup(generate_fen()); return true;
+  }
+  function validate_fen(fen) {
+    var errors = { 0:'No errors.', 1:'FEN string must contain six space-delimited fields.',
+      2:'6th field (move number) must be a positive integer.',
+      3:'5th field (half move counter) must be a non-negative integer.',
+      4:'4th field (en-passant square) is invalid.', 5:'3rd field (castling availability) is invalid.',
+      6:'2nd field (side to move) is invalid.',
+      7:"1st field (piece positions) does not contain 8 '/'-delimited rows.",
+      8:'1st field (piece positions) is invalid [consecutive numbers].',
+      9:'1st field (piece positions) is invalid [invalid piece].',
+      10:'1st field (piece positions) is invalid [row too large].',
+      11:'Illegal en-passant square' };
+    var tokens = fen.split(/\s+/);
+    if (tokens.length !== 6) return { valid:false, error_number:1, error:errors[1] };
+    if (isNaN(tokens[5]) || parseInt(tokens[5],10) <= 0) return { valid:false, error_number:2, error:errors[2] };
+    if (isNaN(tokens[4]) || parseInt(tokens[4],10) < 0) return { valid:false, error_number:3, error:errors[3] };
+    if (!/^(-|[abcdefgh][36])$/.test(tokens[3])) return { valid:false, error_number:4, error:errors[4] };
+    if (!/^(KQ?k?q?|Qk?q?|kq?|q|-)$/.test(tokens[2])) return { valid:false, error_number:5, error:errors[5] };
+    if (!/^(w|b)$/.test(tokens[1])) return { valid:false, error_number:6, error:errors[6] };
+    var rows = tokens[0].split('/');
+    if (rows.length !== 8) return { valid:false, error_number:7, error:errors[7] };
+    for (var i = 0; i < rows.length; i++) {
+      var sum_fields = 0, previous_was_number = false;
+      for (var k = 0; k < rows[i].length; k++) {
+        if (!isNaN(rows[i][k])) {
+          if (previous_was_number) return { valid:false, error_number:8, error:errors[8] };
+          sum_fields += parseInt(rows[i][k],10); previous_was_number = true;
+        } else {
+          if (!/^[prnbqkPRNBQK]$/.test(rows[i][k])) return { valid:false, error_number:9, error:errors[9] };
+          sum_fields += 1; previous_was_number = false;
+        }
+      }
+      if (sum_fields !== 8) return { valid:false, error_number:10, error:errors[10] };
+    }
+    if ((tokens[3][1]=='3' && tokens[1]=='w') || (tokens[3][1]=='6' && tokens[1]=='b'))
+      return { valid:false, error_number:11, error:errors[11] };
+    return { valid:true, error_number:0, error:errors[0] };
+  }
+  function generate_fen() {
+    var empty = 0, fen = '';
+    for (var i = SQUARES.a8; i <= SQUARES.h1; i++) {
+      if (board[i] == null) { empty++; }
+      else { if (empty > 0) { fen += empty; empty = 0; }
+        var color = board[i].color; var piece = board[i].type;
+        fen += color === WHITE ? piece.toUpperCase() : piece.toLowerCase();
+      }
+      if ((i + 1) & 0x88) { if (empty > 0) { fen += empty; }
+        if (i !== SQUARES.h1) fen += '/'; empty = 0; i += 8;
+      }
+    }
+    var cflags = '';
+    if (castling[WHITE] & BITS.KSIDE_CASTLE) cflags += 'K';
+    if (castling[WHITE] & BITS.QSIDE_CASTLE) cflags += 'Q';
+    if (castling[BLACK] & BITS.KSIDE_CASTLE) cflags += 'k';
+    if (castling[BLACK] & BITS.QSIDE_CASTLE) cflags += 'q';
+    cflags = cflags || '-';
+    var epflags = ep_square === EMPTY ? '-' : algebraic(ep_square);
+    return [fen, turn, cflags, epflags, half_moves, move_number].join(' ');
+  }
+  function set_header(args) {
+    for (var i = 0; i < args.length; i += 2)
+      if (typeof args[i]==='string' && typeof args[i+1]==='string') header[args[i]] = args[i+1];
+    return header;
+  }
+  function update_setup(fen) {
+    if (history.length > 0) return;
+    if (fen !== DEFAULT_POSITION) { header['SetUp']='1'; header['FEN']=fen; }
+    else { delete header['SetUp']; delete header['FEN']; }
+  }
+  function get(square) {
+    var piece = board[SQUARES[square]];
+    return piece ? { type:piece.type, color:piece.color } : null;
+  }
+  function put(piece, square) {
+    if (!('type' in piece && 'color' in piece)) return false;
+    if (SYMBOLS.indexOf(piece.type.toLowerCase()) === -1) return false;
+    if (!(square in SQUARES)) return false;
+    var sq = SQUARES[square];
+    if (piece.type == KING && !(kings[piece.color] == EMPTY || kings[piece.color] == sq)) return false;
+    board[sq] = { type:piece.type, color:piece.color };
+    if (piece.type === KING) kings[piece.color] = sq;
+    update_setup(generate_fen()); return true;
+  }
+  function remove(square) {
+    var piece = get(square); board[SQUARES[square]] = null;
+    if (piece && piece.type === KING) kings[piece.color] = EMPTY;
+    update_setup(generate_fen()); return piece;
+  }
+  function build_move(board, from, to, flags, promotion) {
+    var move = { color:turn, from:from, to:to, flags:flags, piece:board[from].type };
+    if (promotion) { move.flags |= BITS.PROMOTION; move.promotion = promotion; }
+    if (board[to]) move.captured = board[to].type;
+    else if (flags & BITS.EP_CAPTURE) move.captured = PAWN;
+    return move;
+  }
+  function generate_moves(options) {
+    function add_move(board, moves, from, to, flags) {
+      if (board[from].type === PAWN && (rank(to) === RANK_8 || rank(to) === RANK_1)) {
+        var pieces = [QUEEN, ROOK, BISHOP, KNIGHT];
+        for (var i = 0, len = pieces.length; i < len; i++) moves.push(build_move(board, from, to, flags, pieces[i]));
+      } else { moves.push(build_move(board, from, to, flags)); }
+    }
+    var moves = [], us = turn, them = swap_color(us);
+    var second_rank = { b: RANK_7, w: RANK_2 };
+    var first_sq = SQUARES.a8, last_sq = SQUARES.h1, single_square = false;
+    var legal = typeof options !== 'undefined' && 'legal' in options ? options.legal : true;
+    if (typeof options !== 'undefined' && 'square' in options) {
+      if (options.square in SQUARES) { first_sq = last_sq = SQUARES[options.square]; single_square = true; }
+      else return [];
+    }
+    for (var i = first_sq; i <= last_sq; i++) {
+      if (i & 0x88) { i += 7; continue; }
+      var piece = board[i];
+      if (piece == null || piece.color !== us) continue;
+      if (piece.type === PAWN) {
+        var square = i + PAWN_OFFSETS[us][0];
+        if (board[square] == null) {
+          add_move(board, moves, i, square, BITS.NORMAL);
+          square = i + PAWN_OFFSETS[us][1];
+          if (second_rank[us] === rank(i) && board[square] == null)
+            add_move(board, moves, i, square, BITS.BIG_PAWN);
+        }
+        for (var j = 2; j < 4; j++) {
+          square = i + PAWN_OFFSETS[us][j];
+          if (square & 0x88) continue;
+          if (board[square] != null && board[square].color === them) add_move(board, moves, i, square, BITS.CAPTURE);
+          else if (square === ep_square) add_move(board, moves, i, ep_square, BITS.EP_CAPTURE);
+        }
+      } else {
+        for (var j = 0, len = PIECE_OFFSETS[piece.type].length; j < len; j++) {
+          var offset = PIECE_OFFSETS[piece.type][j]; var square = i;
+          while (true) {
+            square += offset; if (square & 0x88) break;
+            if (board[square] == null) { add_move(board, moves, i, square, BITS.NORMAL); }
+            else { if (board[square].color === us) break; add_move(board, moves, i, square, BITS.CAPTURE); break; }
+            if (piece.type === 'n' || piece.type === 'k') break;
+          }
+        }
+      }
+    }
+    if (!single_square || last_sq === kings[us]) {
+      if (castling[us] & BITS.KSIDE_CASTLE) {
+        var castling_from = kings[us], castling_to = castling_from + 2;
+        if (board[castling_from+1]==null && board[castling_to]==null &&
+            !attacked(them,kings[us]) && !attacked(them,castling_from+1) && !attacked(them,castling_to))
+          add_move(board, moves, kings[us], castling_to, BITS.KSIDE_CASTLE);
+      }
+      if (castling[us] & BITS.QSIDE_CASTLE) {
+        var castling_from = kings[us], castling_to = castling_from - 2;
+        if (board[castling_from-1]==null && board[castling_from-2]==null && board[castling_from-3]==null &&
+            !attacked(them,kings[us]) && !attacked(them,castling_from-1) && !attacked(them,castling_to))
+          add_move(board, moves, kings[us], castling_to, BITS.QSIDE_CASTLE);
+      }
+    }
+    if (!legal) return moves;
+    var legal_moves = [];
+    for (var i = 0, len = moves.length; i < len; i++) {
+      make_move(moves[i]);
+      if (!king_attacked(us)) legal_moves.push(moves[i]);
+      undo_move();
+    }
+    return legal_moves;
+  }
+  function generate_captures() {
+    var moves = [], us = turn, them = swap_color(us);
+    for (var i = SQUARES.a8; i <= SQUARES.h1; i++) {
+      if (i & 0x88) { i += 7; continue; }
+      var piece = board[i];
+      if (piece == null || piece.color !== us) continue;
+      if (piece.type === PAWN) {
+        for (var j = 2; j < 4; j++) {
+          var square = i + PAWN_OFFSETS[us][j];
+          if (square & 0x88) continue;
+          if (board[square] != null && board[square].color === them) {
+            if (rank(square) === RANK_8 || rank(square) === RANK_1) {
+              moves.push(build_move(board, i, square, BITS.CAPTURE, QUEEN));
+              moves.push(build_move(board, i, square, BITS.CAPTURE, ROOK));
+              moves.push(build_move(board, i, square, BITS.CAPTURE, BISHOP));
+              moves.push(build_move(board, i, square, BITS.CAPTURE, KNIGHT));
+            } else { moves.push(build_move(board, i, square, BITS.CAPTURE)); }
+          } else if (square === ep_square) {
+            moves.push(build_move(board, i, ep_square, BITS.EP_CAPTURE));
+          }
+        }
+        var push_sq = i + PAWN_OFFSETS[us][0];
+        if (!(push_sq & 0x88) && board[push_sq] == null &&
+            (rank(push_sq) === RANK_8 || rank(push_sq) === RANK_1)) {
+          moves.push(build_move(board, i, push_sq, BITS.NORMAL, QUEEN));
+          moves.push(build_move(board, i, push_sq, BITS.NORMAL, KNIGHT));
+        }
+      } else {
+        for (var j = 0, len = PIECE_OFFSETS[piece.type].length; j < len; j++) {
+          var offset = PIECE_OFFSETS[piece.type][j]; var square = i;
+          while (true) {
+            square += offset; if (square & 0x88) break;
+            if (board[square] == null) { if (piece.type==='n'||piece.type==='k') break; continue; }
+            if (board[square].color === us) break;
+            moves.push(build_move(board, i, square, BITS.CAPTURE)); break;
+          }
+        }
+      }
+    }
+    var legal_moves = [];
+    for (var i = 0, len = moves.length; i < len; i++) {
+      make_move(moves[i]); if (!king_attacked(us)) legal_moves.push(moves[i]); undo_move();
+    }
+    return legal_moves;
+  }
+  function move_to_san(move, sloppy) {
+    var output = '';
+    if (move.flags & BITS.KSIDE_CASTLE) { output = 'O-O'; }
+    else if (move.flags & BITS.QSIDE_CASTLE) { output = 'O-O-O'; }
+    else {
+      var disambiguator = get_disambiguator(move, sloppy);
+      if (move.piece !== PAWN) output += move.piece.toUpperCase() + disambiguator;
+      if (move.flags & (BITS.CAPTURE | BITS.EP_CAPTURE)) {
+        if (move.piece === PAWN) output += algebraic(move.from)[0];
+        output += 'x';
+      }
+      output += algebraic(move.to);
+      if (move.flags & BITS.PROMOTION) output += '=' + move.promotion.toUpperCase();
+    }
+    make_move(move);
+    if (in_check()) { if (in_checkmate()) output += '#'; else output += '+'; }
+    undo_move();
+    return output;
+  }
+  function stripped_san(move) { return move.replace(/=/, '').replace(/[+#]?[?!]*$/, ''); }
+  function attacked(color, square) {
+    for (var i = SQUARES.a8; i <= SQUARES.h1; i++) {
+      if (i & 0x88) { i += 7; continue; }
+      if (board[i] == null || board[i].color !== color) continue;
+      var piece = board[i]; var difference = i - square; var index = difference + 119;
+      if (ATTACKS[index] & (1 << SHIFTS[piece.type])) {
+        if (piece.type === PAWN) {
+          if (difference > 0) { if (piece.color === WHITE) return true; }
+          else { if (piece.color === BLACK) return true; }
+          continue;
+        }
+        if (piece.type === 'n' || piece.type === 'k') return true;
+        var offset = RAYS[index]; var j = i + offset; var blocked = false;
+        while (j !== square) { if (board[j] != null) { blocked = true; break; } j += offset; }
+        if (!blocked) return true;
+      }
+    }
+    return false;
+  }
+  function king_attacked(color) { return attacked(swap_color(color), kings[color]); }
+  function in_check() { return king_attacked(turn); }
+  function in_checkmate() { return in_check() && generate_moves().length === 0; }
+  function in_stalemate() { return !in_check() && generate_moves().length === 0; }
+  function insufficient_material() {
+    var pieces = {}, bishops = [], num_pieces = 0, sq_color = 0;
+    for (var i = SQUARES.a8; i <= SQUARES.h1; i++) {
+      sq_color = (sq_color + 1) % 2; if (i & 0x88) { i += 7; continue; }
+      var piece = board[i];
+      if (piece) { pieces[piece.type] = piece.type in pieces ? pieces[piece.type]+1 : 1;
+        if (piece.type === BISHOP) bishops.push(sq_color); num_pieces++;
+      }
+    }
+    if (num_pieces === 2) return true;
+    if (num_pieces === 3 && (pieces[BISHOP] === 1 || pieces[KNIGHT] === 1)) return true;
+    if (num_pieces === pieces[BISHOP] + 2) {
+      var sum = 0, len = bishops.length;
+      for (var i = 0; i < len; i++) sum += bishops[i];
+      if (sum === 0 || sum === len) return true;
+    }
+    return false;
+  }
+  function in_threefold_repetition() {
+    var moves = [], positions = {}, repetition = false;
+    while (true) { var move = undo_move(); if (!move) break; moves.push(move); }
+    while (true) {
+      var fen = generate_fen().split(' ').slice(0,4).join(' ');
+      positions[fen] = fen in positions ? positions[fen]+1 : 1;
+      if (positions[fen] >= 3) repetition = true;
+      if (!moves.length) break; make_move(moves.pop());
+    }
+    return repetition;
+  }
+  function push(move) {
+    history.push({ move:move, kings:{b:kings.b,w:kings.w}, turn:turn,
+      castling:{b:castling.b,w:castling.w}, ep_square:ep_square,
+      half_moves:half_moves, move_number:move_number });
+  }
+  function make_move(move) {
+    var us = turn, them = swap_color(us); push(move);
+    board[move.to] = board[move.from]; board[move.from] = null;
+    if (move.flags & BITS.EP_CAPTURE) {
+      if (turn === BLACK) board[move.to - 16] = null; else board[move.to + 16] = null;
+    }
+    if (move.flags & BITS.PROMOTION) board[move.to] = { type:move.promotion, color:us };
+    if (board[move.to].type === KING) {
+      kings[board[move.to].color] = move.to;
+      if (move.flags & BITS.KSIDE_CASTLE) {
+        var castling_to = move.to-1, castling_from = move.to+1;
+        board[castling_to] = board[castling_from]; board[castling_from] = null;
+      } else if (move.flags & BITS.QSIDE_CASTLE) {
+        var castling_to = move.to+1, castling_from = move.to-2;
+        board[castling_to] = board[castling_from]; board[castling_from] = null;
+      }
+      /* FIX: was castling[us] = '' (string); now numeric 0 */
+      castling[us] = 0;
+    }
+    if (castling[us]) {
+      for (var i = 0, len = ROOKS[us].length; i < len; i++) {
+        if (move.from === ROOKS[us][i].square && castling[us] & ROOKS[us][i].flag)
+          { castling[us] ^= ROOKS[us][i].flag; break; }
+      }
+    }
+    if (castling[them]) {
+      for (var i = 0, len = ROOKS[them].length; i < len; i++) {
+        if (move.to === ROOKS[them][i].square && castling[them] & ROOKS[them][i].flag)
+          { castling[them] ^= ROOKS[them][i].flag; break; }
+      }
+    }
+    if (move.flags & BITS.BIG_PAWN) {
+      if (turn === 'b') ep_square = move.to - 16; else ep_square = move.to + 16;
+    } else { ep_square = EMPTY; }
+    if (move.piece === PAWN) half_moves = 0;
+    else if (move.flags & (BITS.CAPTURE | BITS.EP_CAPTURE)) half_moves = 0;
+    else half_moves++;
+    if (turn === BLACK) move_number++;
+    turn = swap_color(turn);
+  }
+  function undo_move() {
+    var old = history.pop(); if (old == null) return null;
+    var move = old.move; kings = old.kings; turn = old.turn; castling = old.castling;
+    ep_square = old.ep_square; half_moves = old.half_moves; move_number = old.move_number;
+    var us = turn, them = swap_color(turn);
+    board[move.from] = board[move.to]; board[move.from].type = move.piece; board[move.to] = null;
+    if (move.flags & BITS.CAPTURE) board[move.to] = { type:move.captured, color:them };
+    else if (move.flags & BITS.EP_CAPTURE) {
+      var index; if (us === BLACK) index = move.to - 16; else index = move.to + 16;
+      board[index] = { type:PAWN, color:them };
+    }
+    if (move.flags & (BITS.KSIDE_CASTLE | BITS.QSIDE_CASTLE)) {
+      var castling_to, castling_from;
+      if (move.flags & BITS.KSIDE_CASTLE) { castling_to = move.to+1; castling_from = move.to-1; }
+      else if (move.flags & BITS.QSIDE_CASTLE) { castling_to = move.to-2; castling_from = move.to+1; }
+      board[castling_to] = board[castling_from]; board[castling_from] = null;
+    }
+    return move;
+  }
+  function get_disambiguator(move, sloppy) {
+    var moves = generate_moves({legal:!sloppy});
+    var from = move.from, to = move.to, piece = move.piece;
+    var ambiguities = 0, same_rank = 0, same_file = 0;
+    for (var i = 0, len = moves.length; i < len; i++) {
+      var ambig_from = moves[i].from, ambig_to = moves[i].to, ambig_piece = moves[i].piece;
+      if (piece === ambig_piece && from !== ambig_from && to === ambig_to) {
+        ambiguities++;
+        if (rank(from) === rank(ambig_from)) same_rank++;
+        if (file(from) === file(ambig_from)) same_file++;
+      }
+    }
+    if (ambiguities > 0) {
+      if (same_rank > 0 && same_file > 0) return algebraic(from);
+      else if (same_file > 0) return algebraic(from).charAt(1);
+      else return algebraic(from).charAt(0);
+    }
+    return '';
+  }
+  function move_from_san(move, sloppy) {
+    var clean_move = stripped_san(move);
+    if (sloppy) {
+      var matches = clean_move.match(/([pnbrqkPNBRQK])?([a-h][1-8])x?-?([a-h][1-8])([qrbnQRBN])?/);
+      if (matches) { var piece=matches[1], from=matches[2], to=matches[3], promotion=matches[4]; }
+    }
+    var moves = generate_moves();
+    for (var i = 0, len = moves.length; i < len; i++) {
+      if (clean_move === stripped_san(move_to_san(moves[i])) ||
+          (sloppy && clean_move === stripped_san(move_to_san(moves[i], true)))) return moves[i];
+      else if (matches && (!piece || piece.toLowerCase()==moves[i].piece) &&
+               SQUARES[from]==moves[i].from && SQUARES[to]==moves[i].to &&
+               (!promotion || promotion.toLowerCase()==moves[i].promotion)) return moves[i];
+    }
+    return null;
+  }
+  function rank(i) { return i >> 4; }
+  function file(i) { return i & 15; }
+  function algebraic(i) { var f=file(i), r=rank(i); return 'abcdefgh'.substring(f,f+1)+'87654321'.substring(r,r+1); }
+  function swap_color(c) { return c === WHITE ? BLACK : WHITE; }
+  function is_digit(c) { return '0123456789'.indexOf(c) !== -1; }
+  function make_pretty(ugly_move) {
+    var move = clone(ugly_move); move.san = move_to_san(move, false);
+    move.to = algebraic(move.to); move.from = algebraic(move.from);
+    var flags = '';
+    for (var flag in BITS) { if (BITS[flag] & move.flags) flags += FLAGS[flag]; }
+    move.flags = flags; return move;
+  }
+  function clone(obj) {
+    var dupe = obj instanceof Array ? [] : {};
+    for (var property in obj) { if (typeof property === 'object') dupe[property]=clone(obj[property]); else dupe[property]=obj[property]; }
+    return dupe;
+  }
+  function trim(str) { return str.replace(/^\s+|\s+$/g, ''); }
+
+  return {
+    WHITE:WHITE, BLACK:BLACK, PAWN:PAWN, KNIGHT:KNIGHT, BISHOP:BISHOP, ROOK:ROOK, QUEEN:QUEEN, KING:KING,
+    SQUARES: (function() { var keys=[]; for (var i=SQUARES.a8; i<=SQUARES.h1; i++) { if(i&0x88){i+=7;continue;} keys.push(algebraic(i)); } return keys; })(),
+    FLAGS: FLAGS,
+    load: function(fen) { return load(fen); },
+    reset: function() { return reset(); },
+    moves: function(options) {
+      var ugly_moves = generate_moves(options), moves = [];
+      for (var i=0,len=ugly_moves.length;i<len;i++) {
+        if (typeof options!=='undefined' && 'verbose' in options && options.verbose) moves.push(make_pretty(ugly_moves[i]));
+        else moves.push(move_to_san(ugly_moves[i], false));
+      }
+      return moves;
+    },
+    in_check: function() { return in_check(); },
+    in_checkmate: function() { return in_checkmate(); },
+    in_stalemate: function() { return in_stalemate(); },
+    in_draw: function() { return half_moves>=100||in_stalemate()||insufficient_material()||in_threefold_repetition(); },
+    insufficient_material: function() { return insufficient_material(); },
+    in_threefold_repetition: function() { return in_threefold_repetition(); },
+    game_over: function() { return half_moves>=100||in_checkmate()||in_stalemate()||insufficient_material()||in_threefold_repetition(); },
+    validate_fen: function(fen) { return validate_fen(fen); },
+    fen: function() { return generate_fen(); },
+    board: function() {
+      var output=[], row=[];
+      for (var i=SQUARES.a8;i<=SQUARES.h1;i++) {
+        if (board[i]==null) row.push(null); else row.push({type:board[i].type,color:board[i].color});
+        if ((i+1)&0x88) { output.push(row); row=[]; i+=8; }
+      }
+      return output;
+    },
+    header: function() { return set_header(arguments); },
+    ascii: function() {
+      var s='   +------------------------+\n';
+      for (var i=SQUARES.a8;i<=SQUARES.h1;i++) {
+        if (file(i)===0) s+=' '+'87654321'[rank(i)]+' |';
+        if (board[i]==null) s+=' . ';
+        else { var piece=board[i].type,color=board[i].color; s+=' '+(color===WHITE?piece.toUpperCase():piece.toLowerCase())+' '; }
+        if ((i+1)&0x88) { s+='|\n'; i+=8; }
+      }
+      s+='   +------------------------+\n     a  b  c  d  e  f  g  h\n'; return s;
+    },
+    turn: function() { return turn; },
+    move: function(move, options) {
+      var sloppy = typeof options!=='undefined' && 'sloppy' in options ? options.sloppy : false;
+      var move_obj = null;
+      if (typeof move === 'string') { move_obj = move_from_san(move, sloppy); }
+      else if (typeof move === 'object') {
+        var moves = generate_moves();
+        for (var i=0,len=moves.length;i<len;i++) {
+          if (move.from===algebraic(moves[i].from) && move.to===algebraic(moves[i].to) &&
+              (!('promotion' in moves[i]) || move.promotion===moves[i].promotion))
+            { move_obj=moves[i]; break; }
+        }
+      }
+      if (!move_obj) return null;
+      var pretty_move = make_pretty(move_obj); make_move(move_obj); return pretty_move;
+    },
+    undo: function() { var move=undo_move(); return move ? make_pretty(move) : null; },
+    clear: function() { return clear(); },
+    put: function(piece,square) { return put(piece,square); },
+    get: function(square) { return get(square); },
+    remove: function(square) { return remove(square); },
+    square_color: function(square) {
+      if (square in SQUARES) { var sq_0x88=SQUARES[square]; return (rank(sq_0x88)+file(sq_0x88))%2===0?'light':'dark'; }
+      return null;
+    },
+    history: function(options) {
+      var reversed_history=[], move_history=[];
+      var verbose = typeof options!=='undefined' && 'verbose' in options && options.verbose;
+      while (history.length > 0) reversed_history.push(undo_move());
+      while (reversed_history.length > 0) {
+        var move = reversed_history.pop();
+        if (verbose) move_history.push(make_pretty(move)); else move_history.push(move_to_san(move));
+        make_move(move);
+      }
+      return move_history;
+    },
+    /* ── Fast paths for engine ───────────────────────── */
+    fast_moves: function() { return generate_moves(); },
+    fast_captures: function() { return generate_captures(); },
+    fast_make: function(m) { make_move(m); },
+    fast_undo: function() { undo_move(); },
+    fast_raw_u: function(xt) {
+      var Uw=0, Ub=0;
+      for (var i=SQUARES.a8; i<=SQUARES.h1; i++) {
+        if (i&0x88) { i+=7; continue; }
+        var p=board[i]; if (p==null) continue;
+        var r=7-(i>>4), f=i&7, idx=r*8+f;
+        if (p.color===WHITE) Uw+=xt['w'+p.type][idx];
+        else Ub+=xt['b'+p.type][idx];
+      }
+      return (turn===WHITE) ? Uw-Ub : Ub-Uw;
+    },
+    fast_raw_u_split: function(xt) {
+      var Uw=0, Ub=0;
+      for (var i=SQUARES.a8; i<=SQUARES.h1; i++) {
+        if (i&0x88) { i+=7; continue; }
+        var p=board[i]; if (p==null) continue;
+        var r=7-(i>>4), f=i&7, idx=r*8+f;
+        if (p.color===WHITE) Uw+=xt['w'+p.type][idx]; else Ub+=xt['b'+p.type][idx];
+      }
+      return { Uw:Uw, Ub:Ub };
+    },
+    fast_in_check: function() { return in_check(); },
+    fast_in_checkmate: function() { return in_checkmate(); },
+    fast_turn: function() { return turn; },
+    fast_to_san: function(m) { return move_to_san(m); },
+    fast_algebraic: function(i) { return algebraic(i); },
+    /* 32-bit FNV-1a hash: no string allocation, O(64) integer arithmetic */
+    fast_hash: function() {
+      var h = (turn === WHITE) ? 0x811c9dc5 : 0x050c5d1f;
+      for (var i=SQUARES.a8; i<=SQUARES.h1; i++) {
+        if (i&0x88) { i+=7; continue; }
+        var p=board[i];
+        var v = p ? (p.color===WHITE ? 0 : 6) + SHIFTS[p.type] + 1 : 0;
+        h = Math.imul(h ^ v, 0x01000193);
+      }
+      h = Math.imul(h ^ ((castling.w << 4) | castling.b), 0x01000193);
+      h = Math.imul(h ^ (ep_square + 2), 0x01000193);
+      return h | 0;
+    }
+  };
+};
+
+/* ================================================================
+ * ENGINE — Thermodynamic Search
+ * ================================================================ */
+
+// ── Constants ──────────────────────────────────────────────
+const T_FLOOR = 0.1;
+const PIECE_VALUE = { p:8, n:24, b:26, r:40, q:72, k:0 };
+const PAWN_XRAY = 11;
+const CHECKMATE_SCORE = 100000;
+const TIME_LIMITS = { easy:500, medium:2000, hard:8000, max:20000 };
+const BOLTZ_SIGMA = 3;
+const NODE_HARD_LIMIT = 1000000;
+const PIECE_CHAR = {
+    wk:'♔',wq:'♕',wr:'♖',wb:'♗',wn:'♘',wp:'♙',
+    bk:'♚',bq:'♛',br:'♜',bb:'♝',bn:'♞',bp:'♟'
+};
+const PIECE_NAME = { p:'Pawn', n:'Knight', b:'Bishop', r:'Rook', q:'Queen' };
+
+// ── Precomputed X-ray Mobility Table ───────────────────────
+const XRAY = {};
+(function buildXrayTable() {
+    function xm(type, file, rank, color) {
+        switch (type) {
+            case 'r': return 14;
+            case 'b': return Math.min(file,rank)+Math.min(7-file,rank)+Math.min(file,7-rank)+Math.min(7-file,7-rank);
+            case 'q': return 14+Math.min(file,rank)+Math.min(7-file,rank)+Math.min(file,7-rank)+Math.min(7-file,7-rank);
+            case 'n': { let c=0; for (const [df,dr] of [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]]) if (file+df>=0&&file+df<=7&&rank+dr>=0&&rank+dr<=7) c++; return c; }
+            case 'k': { let c=0; for (let df=-1;df<=1;df++) for (let dr=-1;dr<=1;dr++) { if (!df&&!dr) continue; if (file+df>=0&&file+df<=7&&rank+dr>=0&&rank+dr<=7) c++; } return c; }
+            case 'p': { let c=0,dir=color==='w'?1:-1,nr=rank+dir; if (nr>=0&&nr<=7) { c++; if (file>0) c++; if (file<7) c++; } if (rank===(color==='w'?1:6)) { if (rank+2*dir>=0&&rank+2*dir<=7) c++; } return c; }
+        }
+        return 0;
+    }
+    for (const color of ['w','b'])
+        for (const type of ['p','n','b','r','q','k']) {
+            const t = new Int8Array(64);
+            const base = PIECE_VALUE[type];
+            for (let rank=0;rank<8;rank++) for (let file=0;file<8;file++) t[rank*8+file]=base+xm(type,file,rank,color);
+            XRAY[color+type] = t;
+        }
+})();
+
+// ── Game State ─────────────────────────────────────────────
+let game = new Chess();
+let boardFlipped = false;
+let selectedSq = null;
+let legalTargets = [];
+let humanColor = 'w';
+let aiColor = 'b';
+let thinking = false;
+let lastMoveSquares = null;
+let moveHistory = [];
+let nodeCount = 0;
+let searchStats = { depth: 0, nodes: 0 };
+let graphData = [];
+let activeC = 1;
+let boardCells = null;
+let dashTimeout = null;
+let searchDeadline = Infinity;
+
+// ── Transposition Cache ────────────────────────────────────
+let thermoCache = new Map();
+const THERMO_CACHE_MAX = 100000;
+
+// ── X-ray evaluation: split by color ───────────────────────
+function rawU(g) {
+    return g.fast_raw_u_split ? g.fast_raw_u_split(XRAY) : rawU_slow(g);
+}
+function rawU_slow(g) {
+    let Uw=0, Ub=0;
+    const b = g.board();
+    for (let row=0;row<8;row++) for (let col=0;col<8;col++) {
+        const p=b[row][col]; if (!p) continue;
+        const idx=(7-row)*8+col;
+        if (p.color==='w') Uw+=XRAY['w'+p.type][idx]; else Ub+=XRAY['b'+p.type][idx];
+    }
+    return { Uw, Ub };
+}
+
+// ── Quiescence Search ──────────────────────────────────────
+// Resolves captures and promotions to reach a quiet position
+// before applying the static XRAY evaluation. Positions with
+// pending captures are far from equilibrium; computing
+// thermodynamic state variables for them is meaningless.
+// Alpha-beta is used here (not Boltzmann) because quiescence
+// enumerates tactical sequences exhaustively.
+function quiesce(g, alpha, beta) {
+    nodeCount++;
+    const inCheck = g.fast_in_check();
+
+    if (!inCheck) {
+        const standPat = g.fast_raw_u(XRAY);
+        if (standPat >= beta) return standPat;
+        if (standPat > alpha) alpha = standPat;
+    }
+
+    // In check: all evasions. Not in check: captures and promotions only.
+    const moves = inCheck ? g.fast_moves() : g.fast_captures();
+    if (moves.length === 0) return inCheck ? -CHECKMATE_SCORE : alpha;
+
+    for (let i = 0; i < moves.length; i++) {
+        g.fast_make(moves[i]);
+        const score = -quiesce(g, -beta, -alpha);
+        g.fast_undo();
+        if (score >= beta) return score;
+        if (score > alpha) alpha = score;
+    }
+
+    return alpha;
+}
+
+// ── Self-Consistent Temperature ────────────────────────────
+// Finds the fixed point of T = σ_π(T) / √C, where σ_π is the
+// standard deviation of Q under the Boltzmann distribution at
+// temperature T. At convergence, Var(Q)/T² = C (the heat
+// capacity). C is set by the user:
+//   C < 1 → T amplified → broader distribution → exploratory
+//   C > 1 → T suppressed → sharper distribution → decisive
+//   C = 1 → T = σ (original behavior)
+//
+// Phase 1: MAD for outlier-robust initial estimate.
+// Phase 2: Iterate Boltzmann-weighted σ until convergence.
+function robustT(Qs, n) {
+    const sqrtC = Math.sqrt(activeC);
+    const tmp = new Array(n);
+    for (let i=0;i<n;i++) tmp[i]=Qs[i];
+    tmp.sort((a,b) => a-b);
+    const med = n&1 ? tmp[n>>1] : (tmp[(n>>1)-1]+tmp[n>>1])*0.5;
+    for (let i=0;i<n;i++) tmp[i]=Math.abs(Qs[i]-med);
+    tmp.sort((a,b) => a-b);
+    const mad = n&1 ? tmp[n>>1] : (tmp[(n>>1)-1]+tmp[n>>1])*0.5;
+    let T = Math.max(1.4826*mad / sqrtC, T_FLOOR);
+
+    let maxQ=Qs[0];
+    for (let i=1;i<n;i++) if (Qs[i]>maxQ) maxQ=Qs[i];
+
+    for (let iter=0; iter<8; iter++) {
+        let expSum=0;
+        for (let i=0;i<n;i++) { tmp[i]=Math.exp((Qs[i]-maxQ)/T); expSum+=tmp[i]; }
+        let avgQ=0, avgQ2=0;
+        for (let i=0;i<n;i++) { const p=tmp[i]/expSum; avgQ+=p*Qs[i]; avgQ2+=p*Qs[i]*Qs[i]; }
+        const sigW = Math.sqrt(Math.max(avgQ2 - avgQ*avgQ, 0));
+        const Tnew = Math.max(sigW / sqrtC, T_FLOOR);
+        if (Math.abs(Tnew-T) < 0.01) break;
+        T = Math.max(Math.sqrt(T*Tnew), T_FLOOR);
+    }
+    return T;
+}
+
+// ── Thermodynamic Search: F = T ln Z ───────────────────────
+// Unified search at all depths. Both sides computed identically
+// (equilibrium requires symmetry).
+//   depth ≤ 0: quiescence search (alpha-beta over captures)
+//   depth 1–2: full Boltzmann evaluation of all moves
+//   depth ≥ 3: Boltzmann pruning + importance-sampled tail
+//
+// Draw detection via pathKeys set: if the current position
+// has appeared earlier on the search path, return 0 (draw).
+function thermoSearch(g, depth, pathKeys) {
+    nodeCount++;
+
+    // Node hard limit: degrade gracefully
+    if (nodeCount > NODE_HARD_LIMIT && depth > 1) depth = 1;
+
+    // Periodic time check (every 4096 nodes) for responsiveness
+    if ((nodeCount & 0xFFF) === 0 && performance.now() > searchDeadline) return 0;
+
+    // Leaf / horizon: quiescence → XRAY eval (ideal-gas limit)
+    if (depth <= 0) return quiesce(g, -Infinity, Infinity);
+
+    const posKey = g.fast_hash();
+
+    // Draw detection: repetition on current search path
+    if (pathKeys.has(posKey)) return 0;
+
+    // Transposition table lookup
+    const key = depth + ':' + posKey;
+    const cached = thermoCache.get(key);
+    if (cached !== undefined) return cached;
+
+    const moves = g.fast_moves();
+    const n = moves.length;
+    if (n === 0) {
+        const v = g.fast_in_check() ? -CHECKMATE_SCORE : 0;
+        if (thermoCache.size < THERMO_CACHE_MAX) thermoCache.set(key, v);
+        return v;
+    }
+
+    let Qs;
+
+    if (depth <= 2) {
+        // Full evaluation of all moves
+        Qs = new Array(n);
+        pathKeys.add(posKey);
+        for (let i = 0; i < n; i++) {
+            g.fast_make(moves[i]);
+            Qs[i] = -thermoSearch(g, depth - 1, pathKeys);
+            g.fast_undo();
+        }
+        pathKeys.delete(posKey);
+    } else {
+        // Depth ≥ 3: Boltzmann pruning with MC tail sampling
+        const quickQs = new Array(n);
+        pathKeys.add(posKey);
+        for (let i = 0; i < n; i++) {
+            g.fast_make(moves[i]);
+            quickQs[i] = -thermoSearch(g, depth - 2, pathKeys);
+            g.fast_undo();
+        }
+
+        let qMax = quickQs[0];
+        for (let i = 1; i < n; i++) if (quickQs[i] > qMax) qMax = quickQs[i];
+
+        const T_est = robustT(quickQs, n);
+        const threshold = qMax - BOLTZ_SIGMA * T_est;
+
+        const exactIdx = [];
+        const samplePool = [];
+        for (let i = 0; i < n; i++) {
+            if (quickQs[i] >= threshold) exactIdx.push(i);
+            else samplePool.push(i);
+        }
+
+        Qs = quickQs.slice();
+
+        for (let i = 0; i < exactIdx.length; i++) {
+            const idx = exactIdx[i];
+            g.fast_make(moves[idx]);
+            Qs[idx] = -thermoSearch(g, depth - 1, pathKeys);
+            g.fast_undo();
+        }
+
+        // Adaptive MC sampling: up to 20% of tail, capped at 8
+        const mcSamples = Math.min(Math.ceil(samplePool.length * 0.2), 8);
+        if (mcSamples > 0 && samplePool.length > 0) {
+            let sMaxQ = quickQs[samplePool[0]];
+            for (let j = 1; j < samplePool.length; j++)
+                if (quickQs[samplePool[j]] > sMaxQ) sMaxQ = quickQs[samplePool[j]];
+
+            const weights = new Array(samplePool.length);
+            let wSum = 0;
+            for (let j = 0; j < samplePool.length; j++) {
+                weights[j] = Math.exp((quickQs[samplePool[j]] - sMaxQ) / T_est);
+                wSum += weights[j];
+            }
+
+            const picked = new Uint8Array(samplePool.length);
+            for (let k = 0; k < mcSamples && wSum > 1e-30; k++) {
+                let r = Math.random() * wSum;
+                let chosen = -1;
+                for (let j = 0; j < samplePool.length; j++) {
+                    if (picked[j]) continue;
+                    r -= weights[j];
+                    if (r <= 0) { chosen = j; break; }
+                }
+                if (chosen < 0) {
+                    for (let j = samplePool.length - 1; j >= 0; j--)
+                        if (!picked[j]) { chosen = j; break; }
+                }
+                if (chosen < 0) break;
+                picked[chosen] = 1;
+                wSum -= weights[chosen];
+
+                const idx = samplePool[chosen];
+                g.fast_make(moves[idx]);
+                Qs[idx] = -thermoSearch(g, depth - 1, pathKeys);
+                g.fast_undo();
+            }
+        }
+
+        pathKeys.delete(posKey);
+    }
+
+    return computeF(Qs, n, key);
+}
+
+function computeF(Qs, n, cacheKey) {
+    const T = robustT(Qs, n);
+    let maxQ = Qs[0];
+    for (let i = 1; i < n; i++) if (Qs[i] > maxQ) maxQ = Qs[i];
+    if (!Number.isFinite(maxQ)) {
+        if (cacheKey && thermoCache.size < THERMO_CACHE_MAX) thermoCache.set(cacheKey, maxQ);
+        return maxQ;
+    }
+    let expSum = 0;
+    for (let i = 0; i < n; i++) expSum += Math.exp((Qs[i] - maxQ) / T);
+    const val = maxQ + T * Math.log(expSum);
+    if (cacheKey && thermoCache.size < THERMO_CACHE_MAX) thermoCache.set(cacheKey, val);
+    return val;
+}
+
+// ── Full Thermodynamic State (dashboard analysis) ──────────
+function computeThermodynamics(g, depth) {
+    const rawMoves = g.fast_moves();
+    if (rawMoves.length === 0) return null;
+
+    const pathKeys = new Set();
+    const posKey = g.fast_hash();
+    pathKeys.add(posKey);
+
+    const Qs = new Array(rawMoves.length);
+    const moveNames = new Array(rawMoves.length);
+    const fromSqs = new Array(rawMoves.length);
+    for (let i = 0; i < rawMoves.length; i++) {
+        moveNames[i] = g.fast_to_san(rawMoves[i]);
+        fromSqs[i] = g.fast_algebraic(rawMoves[i].from);
+        g.fast_make(rawMoves[i]);
+        Qs[i] = -thermoSearch(g, depth - 1, pathKeys);
+        g.fast_undo();
+    }
+    pathKeys.delete(posKey);
+
+    const n = Qs.length;
+    const T = robustT(Qs, n);
+    let maxQ = Qs[0], bestIdx = 0;
+    for (let i = 1; i < n; i++) if (Qs[i] > maxQ) { maxQ = Qs[i]; bestIdx = i; }
+
+    const expTerms = new Array(n);
+    let expSum = 0;
+    for (let i = 0; i < n; i++) { expTerms[i] = Math.exp((Qs[i]-maxQ)/T); expSum += expTerms[i]; }
+
+    const F = maxQ + T * Math.log(expSum);
+    const probs = new Array(n);
+    for (let i = 0; i < n; i++) probs[i] = expTerms[i] / expSum;
+
+    let avgQ = 0, S = 0;
+    for (let i = 0; i < n; i++) {
+        avgQ += probs[i] * Qs[i];
+        if (probs[i] > 1e-15) S -= probs[i] * Math.log(probs[i]);
+    }
+    const TS = T * S;
+
+    return { T, F, S, avgQ, TS, probs, moves: moveNames, fromSqs, Qs, bestIdx };
+}
+
+// ── Chemical Potential: μ_P = F − F_{−P} ──────────────────
+// Exact chemical potential from the partition function.
+// F = T ln Z over all moves; F_{-P} = T ln Z_{-P} excludes
+// moves originating from piece P.  μ_P is the free-energy
+// cost of removing piece P from the ensemble.
+//
+// At the search horizon (leaf), U = XRAY — the ideal-gas
+// limit where pieces contribute independently. Above the
+// horizon, chemical potentials emerge from the partition
+// function's recursive dependence on child F values.
+function computeChemicalPotentials(g, thermo) {
+    if (!thermo || !thermo.fromSqs || !thermo.Qs) return [];
+
+    const T = thermo.T;
+    const Qs = thermo.Qs;
+    const n = Qs.length;
+    const board = g.board();
+    const color = g.turn();
+
+    let maxQ = Qs[0];
+    for (let i = 1; i < n; i++) if (Qs[i] > maxQ) maxQ = Qs[i];
+    if (!Number.isFinite(maxQ)) return [];
+
+    const expTerms = new Array(n);
+    let Z = 0;
+    for (let i = 0; i < n; i++) { expTerms[i] = Math.exp((Qs[i] - maxQ) / T); Z += expTerms[i]; }
+    const F = maxQ + T * Math.log(Z);
+
+    // Sum exp-terms by origin square
+    const sqExp = {};
+    for (let i = 0; i < n; i++) {
+        const sq = thermo.fromSqs[i];
+        sqExp[sq] = (sqExp[sq] || 0) + expTerms[i];
+    }
+
+    const results = [];
+    const seen = {};
+    for (let row = 0; row < 8; row++) {
+        for (let col = 0; col < 8; col++) {
+            const p = board[row][col];
+            if (!p || p.color !== color || p.type === 'k') continue;
+            const sq = sqId(col, 7 - row);
+            if (seen[sq]) continue;
+            seen[sq] = 1;
+            const pieceZ = sqExp[sq] || 0;
+            const Z_minus_P = Z - pieceZ;
+            let mu;
+            if (Z_minus_P < 1e-30) {
+                mu = F - (-CHECKMATE_SCORE);
+            } else {
+                const F_minus_P = maxQ + T * Math.log(Z_minus_P);
+                mu = F - F_minus_P;
+            }
+            const pSq = pieceZ / Z;
+            results.push({ type: p.type, square: sq, mu: mu, pSq: pSq });
+        }
+    }
+
+    results.sort((a, b) => b.mu - a.mu);
+    return results;
+}
+
+// ── Iterative Deepening ────────────────────────────────────
+function bestMove(g, timeLimitMs) {
+    const deadline = performance.now() + timeLimitMs;
+    nodeCount = 0;
+    thermoCache = new Map();
+    activeC = parseFloat((document.getElementById('heatCap') || {}).value) || 1;
+
+    const moves = g.fast_moves();
+    const n = moves.length;
+    if (n === 0) return null;
+    if (n === 1) {
+        searchStats = { depth: 1, nodes: 1 };
+        return g.fast_to_san(moves[0]);
+    }
+
+    let bestIdx = 0;
+    let reachedDepth = 0;
+    const pathKeys = new Set();
+    const rootPosKey = g.fast_hash();
+
+    for (let depth = 1; depth <= 64; depth++) {
+        const Qs = new Array(n);
+        let timedOut = false;
+
+        pathKeys.clear();
+        pathKeys.add(rootPosKey);
+
+        for (let i = 0; i < n; i++) {
+            g.fast_make(moves[i]);
+            Qs[i] = -thermoSearch(g, depth - 1, pathKeys);
+            g.fast_undo();
+
+            if (performance.now() > deadline) { timedOut = true; break; }
+        }
+
+        if (timedOut && reachedDepth > 0) break;
+
+        bestIdx = 0;
+        for (let i = 1; i < n; i++) if (Qs[i] > Qs[bestIdx]) bestIdx = i;
+        reachedDepth = depth;
+
+        // Reorder moves by Q for next iteration (best first → better timeout behavior)
+        if (depth < 64) {
+            const order = [];
+            for (let i = 0; i < n; i++) order.push(i);
+            order.sort((a, b) => Qs[b] - Qs[a]);
+            const newMoves = new Array(n);
+            for (let i = 0; i < n; i++) newMoves[i] = moves[order[i]];
+            for (let i = 0; i < n; i++) moves[i] = newMoves[i];
+            bestIdx = 0; // best move is now first after reordering
+        }
+
+        if (performance.now() > deadline) break;
+        if (nodeCount > NODE_HARD_LIMIT) break;
+    }
+
+    searchStats = { depth: reachedDepth, nodes: nodeCount };
+    return g.fast_to_san(moves[bestIdx]);
+}
+
+// buildRootThermo: used only by computeThermodynamics (dashboard) now
+function buildRootThermo(g, rawMoves, Qs, depth) {
+    const n = rawMoves.length;
+    const T = robustT(Qs, n);
+
+    let maxQ = Qs[0], bestIdx = 0;
+    for (let i = 1; i < n; i++) if (Qs[i] > maxQ) { maxQ = Qs[i]; bestIdx = i; }
+
+    const expTerms = new Array(n);
+    let expSum = 0;
+    for (let i = 0; i < n; i++) { expTerms[i] = Math.exp((Qs[i]-maxQ)/T); expSum += expTerms[i]; }
+
+    const F = maxQ + T * Math.log(expSum);
+    const probs = new Array(n);
+    for (let i = 0; i < n; i++) probs[i] = expTerms[i] / expSum;
+
+    let avgQ = 0, S = 0;
+    for (let i = 0; i < n; i++) {
+        avgQ += probs[i] * Qs[i];
+        if (probs[i] > 1e-15) S -= probs[i] * Math.log(probs[i]);
+    }
+    const TS = T * S;
+
+    const moveNames = new Array(n);
+    const fromSqs = new Array(n);
+    for (let i = 0; i < n; i++) {
+        moveNames[i] = g.fast_to_san(rawMoves[i]);
+        fromSqs[i] = g.fast_algebraic(rawMoves[i].from);
+    }
+
+    return { T, F, S, avgQ, TS, probs, moves: moveNames, fromSqs, Qs, bestIdx, depth };
+}
+
+// ── Board Rendering ────────────────────────────────────────
+function sqId(file, rank) { return String.fromCharCode(97+file)+(rank+1); }
+
+function renderBoard() {
+    if (!boardCells) initBoard();
+    const b = game.board();
+    for (let dr = 0; dr < 8; dr++) {
+        for (let dc = 0; dc < 8; dc++) {
+            const cell = boardCells[dr * 8 + dc];
+            const row = boardFlipped ? 7 - dr : dr;
+            const col = boardFlipped ? 7 - dc : dc;
+            const rank = 7 - row, file = col;
+            const sq = sqId(file, rank);
+            const piece = b[row][col];
+            let cls = 'cell ' + ((row + col) % 2 === 0 ? 'light' : 'dark');
+            if (lastMoveSquares && (sq === lastMoveSquares.from || sq === lastMoveSquares.to)) cls += ' last-move';
+            if (sq === selectedSq) cls += ' selected';
+            if (selectedSq && legalTargets.indexOf(sq) >= 0) cls += piece ? ' legal-capture' : ' legal-dot';
+            cell.className = cls;
+            cell._sq = sq;
+            const ch = piece ? PIECE_CHAR[piece.color + piece.type] : '';
+            if (cell._pc.textContent !== ch) cell._pc.textContent = ch;
+            if (cell._rl) cell._rl.textContent = rank + 1;
+            if (cell._fl) cell._fl.textContent = String.fromCharCode(97 + file);
+        }
+    }
+}
+function initBoard() {
+    const el = document.getElementById('board');
+    el.innerHTML = '';
+    boardCells = [];
+    for (let dr = 0; dr < 8; dr++) {
+        const rowEl = document.createElement('div');
+        rowEl.className = 'board-row';
+        for (let dc = 0; dc < 8; dc++) {
+            const cell = document.createElement('div');
+            cell.className = 'cell';
+            const pc = document.createElement('span');
+            cell.appendChild(pc);
+            cell._pc = pc;
+            if (dc === 0) { const l = document.createElement('span'); l.className = 'coord-label rank-label'; cell.appendChild(l); cell._rl = l; }
+            if (dr === 7) { const l = document.createElement('span'); l.className = 'coord-label file-label'; cell.appendChild(l); cell._fl = l; }
+            boardCells.push(cell);
+            rowEl.appendChild(cell);
+        }
+        el.appendChild(rowEl);
+    }
+    el.addEventListener('click', function(e) {
+        let t = e.target;
+        while (t && !t._pc && t !== el) t = t.parentElement;
+        if (t && t._sq) onCellClick(t._sq);
+    });
+}
+
+// ── Interaction ────────────────────────────────────────────
+function onCellClick(sq) {
+    if (thinking || game.game_over()) return;
+    if (game.turn() !== humanColor) return;
+    if (selectedSq) {
+        if (legalTargets.indexOf(sq) >= 0) {
+            const piece = game.get(selectedSq);
+            const toRank = parseInt(sq[1]);
+            if (piece && piece.type==='p' &&
+                ((piece.color==='w'&&toRank===8)||(piece.color==='b'&&toRank===1))) {
+                showPromotion(selectedSq, sq); return;
+            }
+            makeHumanMove(selectedSq, sq);
+        } else { selectSquare(sq); }
+    } else { selectSquare(sq); }
+}
+function selectSquare(sq) {
+    const piece = game.get(sq);
+    if (piece && piece.color===humanColor) {
+        selectedSq = sq;
+        const seen = {};
+        legalTargets = [];
+        const vm = game.moves({verbose:true});
+        for (let i=0;i<vm.length;i++) {
+            if (vm[i].from===sq && !seen[vm[i].to]) { legalTargets.push(vm[i].to); seen[vm[i].to]=true; }
+        }
+    } else { selectedSq=null; legalTargets=[]; }
+    renderBoard();
+}
+function makeHumanMove(from, to, promo) {
+    const result = game.move({from, to, promotion:promo||undefined});
+    if (!result) return;
+    lastMoveSquares = {from, to};
+    moveHistory.push(result.san);
+    selectedSq = null; legalTargets = [];
+    renderBoard(); updateMoveList(); updateDashboard();
+    if (game.game_over()) { handleGameOver(); return; }
+    setStatus('Thinking...');
+    thinking = true;
+    setTimeout(doAiMove, 30);
+}
+function doAiMove() {
+    if (!thinking || game.game_over()) { thinking = false; return; }
+    const timeLimit = TIME_LIMITS[document.getElementById('difficulty').value];
+    const deadline = performance.now() + timeLimit;
+    searchDeadline = deadline;
+    activeC = parseFloat((document.getElementById('heatCap') || {}).value) || 1;
+    nodeCount = 0;
+    thermoCache = new Map();
+    const moves = game.fast_moves();
+    const n = moves.length;
+    if (n === 0) { thinking = false; handleGameOver(); return; }
+    if (n === 1) { finishAiMove(game.fast_to_san(moves[0]), 1, 1); return; }
+    let bestIdx = 0, reachedDepth = 0;
+    const pathKeys = new Set();
+    const rootHash = game.fast_hash();
+    (function searchDepth(depth) {
+        if (performance.now() > deadline || nodeCount > NODE_HARD_LIMIT) {
+            finishAiMove(game.fast_to_san(moves[bestIdx]), reachedDepth, nodeCount); return;
+        }
+        const Qs = new Array(n);
+        let timedOut = false;
+        pathKeys.clear(); pathKeys.add(rootHash);
+        for (let i = 0; i < n; i++) {
+            game.fast_make(moves[i]);
+            Qs[i] = -thermoSearch(game, depth - 1, pathKeys);
+            game.fast_undo();
+            if (performance.now() > deadline) { timedOut = true; break; }
+        }
+        if (!timedOut || reachedDepth === 0) {
+            bestIdx = 0;
+            for (let i = 1; i < n; i++) if (Qs[i] > Qs[bestIdx]) bestIdx = i;
+            reachedDepth = depth;
+            const ord = []; for (let i = 0; i < n; i++) ord.push(i);
+            ord.sort((a, b) => Qs[b] - Qs[a]);
+            const nm = new Array(n); for (let i = 0; i < n; i++) nm[i] = moves[ord[i]];
+            for (let i = 0; i < n; i++) moves[i] = nm[i];
+            bestIdx = 0;
+        }
+        if (timedOut || nodeCount > NODE_HARD_LIMIT) {
+            finishAiMove(game.fast_to_san(moves[bestIdx]), reachedDepth, nodeCount);
+        } else {
+            setTimeout(function() { searchDepth(depth + 1); }, 0);
+        }
+    })(1);
+}
+function finishAiMove(moveSan, depth, nodes) {
+    searchDeadline = Infinity;
+    const result = game.move(moveSan);
+    if (result) { lastMoveSquares = { from: result.from, to: result.to }; moveHistory.push(result.san); }
+    thinking = false;
+    searchStats = { depth: depth, nodes: nodes };
+    renderBoard(); updateMoveList(); updateDashboard();
+    if (game.game_over()) handleGameOver();
+    else {
+        const side = humanColor === 'w' ? 'White' : 'Black';
+        setStatus('Your move (' + side + ') \u2014 depth ' + depth + ', ' + nodes.toLocaleString() + ' nodes');
+    }
+}
+function handleGameOver() {
+    let msg;
+    if (game.in_checkmate()) msg='Checkmate! '+(game.turn()==='w'?'Black':'White')+' wins.';
+    else if (game.in_stalemate()) msg='Stalemate \u2014 draw.';
+    else if (game.in_threefold_repetition()) msg='Threefold repetition \u2014 draw.';
+    else if (game.in_draw()) msg='Draw.';
+    else msg='Game over.';
+    setStatus(msg);
+}
+
+// ── Promotion UI ───────────────────────────────────────────
+function showPromotion(from, to) {
+    const modal=document.getElementById('promotion-modal');
+    const box=document.getElementById('promo-choices');
+    const color=game.turn(); box.innerHTML='';
+    for (const type of ['q','r','b','n']) {
+        const el=document.createElement('div'); el.className='promo-piece';
+        el.textContent=PIECE_CHAR[color+type];
+        el.addEventListener('click', () => { modal.classList.remove('active'); makeHumanMove(from,to,type); });
+        box.appendChild(el);
+    }
+    modal.classList.add('active');
+}
+
+// ── Controls ───────────────────────────────────────────────
+function newGame() {
+    thinking=false; game=new Chess();
+    selectedSq=null; legalTargets=[]; lastMoveSquares=null;
+    moveHistory=[]; thermoCache = new Map(); graphData=[];
+    renderBoard(); updateMoveList(); updateDashboard();
+    if (humanColor==='b') { setStatus('Thinking...'); thinking=true; setTimeout(doAiMove,30); }
+    else setStatus('Your move (White)');
+}
+function undoMove() {
+    if (thinking || moveHistory.length<2) return;
+    game.undo(); game.undo();
+    moveHistory.pop(); moveHistory.pop();
+    if (graphData.length>0) graphData.pop();
+    if (graphData.length>0) graphData.pop();
+    lastMoveSquares=null; selectedSq=null; legalTargets=[];
+    renderBoard(); updateMoveList(); updateDashboard();
+    setStatus('Your move ('+(humanColor==='w'?'White':'Black')+')');
+}
+function flipBoard() { boardFlipped=!boardFlipped; renderBoard(); }
+function switchSides() {
+    if (thinking) return;
+    humanColor = humanColor==='w' ? 'b' : 'w';
+    aiColor = aiColor==='w' ? 'b' : 'w';
+    selectedSq=null; legalTargets=[];
+    thermoCache = new Map();
+    renderBoard();
+    if (!game.game_over() && game.turn()===aiColor) { setStatus('Thinking...'); thinking=true; setTimeout(doAiMove,30); }
+    else setStatus('Your move ('+(humanColor==='w'?'White':'Black')+')');
+}
+function setStatus(msg) { document.getElementById('status').textContent=msg; }
+function onHeatCapChange(val) {
+    activeC = parseFloat(val) || 1;
+    document.getElementById('heatCapVal').textContent = activeC.toFixed(1);
+    if (dashTimeout) clearTimeout(dashTimeout);
+    dashTimeout = setTimeout(updateDashboard, 120);
+}
+function updateMoveList() {
+    const el=document.getElementById('move-list');
+    if (moveHistory.length===0) { el.textContent='Game start'; return; }
+    let s='';
+    for (let i=0;i<moveHistory.length;i+=2) {
+        s+=(i/2+1)+'. '+moveHistory[i];
+        if (moveHistory[i+1]) s+=' '+moveHistory[i+1];
+        s+='  ';
+    }
+    el.textContent=s; el.scrollTop=el.scrollHeight;
+}
+
+// ── Dashboard ──────────────────────────────────────────────
+function updateDashboard() {
+    const { Uw, Ub } = rawU(game);
+    activeC = parseFloat((document.getElementById('heatCap') || {}).value) || 1;
+
+    let thermo = null;
+    let source = '';
+    if (!game.game_over()) {
+        const depth = parseInt(document.getElementById('dashDepth').value) || 1;
+        const saveNC = nodeCount;
+        nodeCount = 0;
+        thermoCache = new Map();
+        thermo = computeThermodynamics(game, depth);
+        nodeCount = saveNC;
+        source = 'Dashboard analysis (depth ' + depth + ')';
+    }
+
+    // Record graph data — tag with side-to-move so T/S can be split
+    if (thermo && moveHistory.length > 0 && graphData.length < moveHistory.length) {
+        const eval_w = (game.turn() === 'w' ? 1 : -1) * thermo.F / PAWN_XRAY;
+        graphData.push({ halfMove: moveHistory.length, eval_w, T: thermo.T, S: thermo.S, side: game.turn() });
+    }
+
+    const mu = thermo ? computeChemicalPotentials(game, thermo) : [];
+
+    renderThermoGrid(Uw, Ub, thermo, source);
+    renderChemPot(mu);
+    renderMoveProbs(thermo);
+    renderGraph();
+}
+
+function fmt(v, d) {
+    if (v == null || !Number.isFinite(v)) return '\u2014';
+    return v.toFixed(d === undefined ? 2 : d);
+}
+
+function renderThermoGrid(Uw, Ub, th, source) {
+    const grid = document.getElementById('thermo-grid');
+    if (!th) { grid.innerHTML='<span class="dash-label">Game over</span>'; return; }
+
+    const evalSide = game.turn();
+    const evalW = evalSide === 'w' ? th.F : -th.F;
+    const sign = evalW >= 0 ? '+' : '';
+
+    const rows = [
+        ['U_w', fmt(Uw,1), 'U_b', fmt(Ub,1)],
+        ['T',   fmt(th.T,4), 'S',  fmt(th.S,4)],
+        ['\u27E8Q\u27E9', fmt(th.avgQ,4), 'TS', fmt(th.TS,4)],
+        ['F=\u27E8Q\u27E9+TS', fmt(th.F,4), 'Eval', sign+fmt(evalW/PAWN_XRAY,2)+' \u2659'],
+    ];
+
+    let html = '<span class="dash-label" style="grid-column:span 4;color:#666;font-size:0.8em;margin-bottom:2px">' +
+               source + '</span>';
+    for (const r of rows) {
+        html += '<span class="dash-label">'+r[0]+'</span><span class="dash-value">'+r[1]+'</span>';
+        html += '<span class="dash-label">'+r[2]+'</span><span class="dash-value">'+r[3]+'</span>';
+    }
+    grid.innerHTML = html;
+}
+
+function renderChemPot(muData) {
+    const el = document.getElementById('dash-chempot');
+    if (!muData || muData.length === 0) { el.innerHTML='<span style="color:#666">N/A</span>'; return; }
+
+    const color = game.turn();
+    let html = '<table class="prob-table"><tr><th>Piece</th><th style="text-align:right">\u03BC (\u2659)</th><th style="text-align:right">p<sub>P</sub></th></tr>';
+    for (const e of muData) {
+        const sym = PIECE_CHAR[color + e.type];
+        const muPawns = e.mu / PAWN_XRAY;
+        const sign = muPawns >= 0 ? '+' : '';
+        html += '<tr><td>' + sym + ' ' + e.square +
+                '</td><td style="text-align:right">' + sign + fmt(muPawns, 2) +
+                '</td><td style="text-align:right">' + fmt(e.pSq, 3) + '</td></tr>';
+    }
+    html += '</table>';
+    el.innerHTML = html;
+}
+
+function renderMoveProbs(th) {
+    const el = document.getElementById('dash-moves');
+    if (!th) { el.innerHTML='<span style="color:#666">N/A</span>'; return; }
+
+    const indexed = [];
+    for (let i=0;i<th.moves.length;i++)
+        indexed.push({ move:th.moves[i], prob:th.probs[i], q:th.Qs[i], isBest:i===th.bestIdx });
+    indexed.sort((a,b) => b.prob - a.prob);
+
+    let maxP = 0;
+    for (let i=0;i<indexed.length;i++) if (indexed[i].prob>maxP) maxP=indexed[i].prob;
+
+    let html = '<table class="prob-table"><tr><th>Move</th><th style="text-align:right">Q (\u2659)</th>' +
+               '<th style="text-align:right">\u03C0</th><th class="prob-bar-cell"></th></tr>';
+    const show = Math.min(indexed.length, 20);
+    for (let i=0; i<show; i++) {
+        const x = indexed[i];
+        const barW = Math.max(2, (x.prob/maxP)*100);
+        const qs = x.q / PAWN_XRAY;
+        const sign = qs >= 0 ? '+' : '';
+        const cls = x.isBest ? ' class="best-move-row"' : '';
+        html += '<tr'+cls+'><td>'+(x.isBest?'\u25B6 ':'')+x.move+'</td><td style="text-align:right">'+sign+fmt(qs,2)+
+                '</td><td style="text-align:right">'+fmt(x.prob,3)+
+                '</td><td class="prob-bar-cell"><div class="prob-bar" style="width:'+barW.toFixed(1)+'%"></div></td></tr>';
+    }
+    if (indexed.length > 20)
+        html += '<tr><td colspan="4" style="color:#666">... '+(indexed.length-20)+' more</td></tr>';
+    html += '</table>';
+    el.innerHTML = html;
+}
+
+// ── Turn-by-turn Graph ─────────────────────────────────────
+function renderGraph() {
+    const canvas = document.getElementById('graph-canvas');
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    const w = rect.width, h = rect.height;
+
+    const variable = document.getElementById('graphVar').value;
+    const splitBySide = (variable === 'T' || variable === 'S');
+
+    ctx.clearRect(0, 0, w, h);
+
+    if (graphData.length === 0) {
+        ctx.fillStyle = '#555';
+        ctx.font = '12px system-ui';
+        ctx.fillText('No data yet', 10, h / 2);
+        return;
+    }
+
+    const pad = { top: 12, right: 10, bottom: 22, left: 42 };
+    const pw = w - pad.left - pad.right;
+    const ph = h - pad.top - pad.bottom;
+
+    const nTotal = graphData.length;
+    function xPos(i) { return pad.left + (nTotal === 1 ? pw/2 : (i/(nTotal-1))*pw); }
+
+    // Build series: eval gets one line; T/S get white + black lines
+    let series; // array of { indices, values, color, label }
+    if (!splitBySide) {
+        const vals = graphData.map(d => d.eval_w);
+        series = [{ indices: graphData.map((_,i)=>i), values: vals, color: '#7ec8e3', label: 'Eval' }];
+    } else {
+        const field = variable === 'T' ? 'T' : 'S';
+        const wIdx = [], wVal = [], bIdx = [], bVal = [];
+        for (let i = 0; i < nTotal; i++) {
+            const d = graphData[i];
+            if (d.side === 'w') { wIdx.push(i); wVal.push(d[field]); }
+            else                { bIdx.push(i); bVal.push(d[field]); }
+        }
+        series = [
+            { indices: wIdx, values: wVal, color: '#e8e8e8', label: 'White' },
+            { indices: bIdx, values: bVal, color: '#f0a050', label: 'Black' }
+        ];
+    }
+
+    // Compute Y range across all series
+    let minY = Infinity, maxY = -Infinity;
+    for (const s of series) for (const v of s.values) { if (v < minY) minY = v; if (v > maxY) maxY = v; }
+    if (variable === 'eval') { minY = Math.min(minY, -0.5); maxY = Math.max(maxY, 0.5); }
+    else { minY = Math.min(minY, 0); maxY = Math.max(maxY, 0.5); }
+    if (maxY - minY < 0.1) { maxY += 0.25; minY -= 0.25; }
+    const rangeY = maxY - minY;
+    function yPos(v) { return pad.top + ph * (1 - (v - minY) / rangeY); }
+
+    // Horizontal grid lines
+    ctx.strokeStyle = '#2a2a3e';
+    ctx.lineWidth = 1;
+    const nGrid = 4;
+    for (let i = 0; i <= nGrid; i++) {
+        const y = pad.top + (i / nGrid) * ph;
+        ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(w - pad.right, y); ctx.stroke();
+    }
+
+    // Zero line for eval
+    if (variable === 'eval' && minY < 0 && maxY > 0) {
+        const zy = yPos(0);
+        ctx.strokeStyle = '#444';
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath(); ctx.moveTo(pad.left, zy); ctx.lineTo(w - pad.right, zy); ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
+    // Draw each series
+    for (const s of series) {
+        if (s.values.length === 0) continue;
+        ctx.strokeStyle = s.color;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        for (let j = 0; j < s.indices.length; j++) {
+            const x = xPos(s.indices[j]), y = yPos(s.values[j]);
+            if (j === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        ctx.fillStyle = s.color;
+        for (let j = 0; j < s.indices.length; j++) {
+            ctx.beginPath();
+            ctx.arc(xPos(s.indices[j]), yPos(s.values[j]), 2.5, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    // Legend for split graphs
+    if (splitBySide && series.length === 2) {
+        ctx.font = '10px Consolas, Menlo, monospace';
+        let lx = pad.left + 4;
+        for (const s of series) {
+            ctx.fillStyle = s.color;
+            ctx.fillRect(lx, pad.top, 10, 3);
+            ctx.fillText(s.label, lx + 13, pad.top + 4);
+            lx += ctx.measureText(s.label).width + 24;
+        }
+    }
+
+    // Y-axis labels
+    ctx.fillStyle = '#888';
+    ctx.font = '10px Consolas, Menlo, monospace';
+    ctx.textAlign = 'right';
+    for (let i = 0; i <= nGrid; i++) {
+        const val = maxY - (i / nGrid) * rangeY;
+        ctx.fillText(val.toFixed(1), pad.left - 5, pad.top + (i / nGrid) * ph + 3);
+    }
+
+    // X-axis labels
+    ctx.textAlign = 'center';
+    const step = Math.max(1, Math.ceil(nTotal / 10));
+    for (let i = 0; i < nTotal; i += step) {
+        ctx.fillText(String(graphData[i].halfMove), xPos(i), h - 4);
+    }
+}
+
+// ── Init ───────────────────────────────────────────────────
+(function init() {
+    if (typeof Chess === 'undefined') {
+        document.getElementById('status').textContent = 'Error: chess.js failed to load.';
+        document.getElementById('status').style.color = '#ff6b6b';
+        return;
+    }
+    renderBoard();
+    updateMoveList();
+    updateDashboard();
+})();
+</script>
+</body>
+</html>

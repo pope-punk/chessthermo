@@ -896,7 +896,7 @@ const XRAY = {};
             case 'b': return Math.min(file,rank)+Math.min(7-file,rank)+Math.min(file,7-rank)+Math.min(7-file,7-rank);
             case 'q': return 14+Math.min(file,rank)+Math.min(7-file,rank)+Math.min(file,7-rank)+Math.min(7-file,7-rank);
             case 'n': { let c=0; for (const [df,dr] of [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]]) if (file+df>=0&&file+df<=7&&rank+dr>=0&&rank+dr<=7) c++; return c; }
-            case 'k': { let c=0; for (let df=-1;df<=1;df++) for (let dr=-1;dr<=1;dr++) { if (!df&&!dr) continue; if (file+df>=0&&file+df<=7&&rank+dr>=0&&rank+dr<=7) c++; } return c; }
+            case 'k': return 0;
             case 'p': { let c=0,dir=color==='w'?1:-1,nr=rank+dir; if (nr>=0&&nr<=7) { c++; if (file>0) c++; if (file<7) c++; } if (rank===(color==='w'?1:6)) { if (rank+2*dir>=0&&rank+2*dir<=7) c++; } return c; }
         }
         return 0;

@@ -20,7 +20,7 @@ body {
     padding: 20px;
     align-items: flex-start;
 }
-#left-panel { flex: 0 0 auto; }
+#left-panel { flex: 0 0 auto; max-width: 548px; }
 #right-panel {
     flex: 1;
     min-width: 310px;
@@ -106,8 +106,8 @@ label { font-size: 0.85em; }
     margin-top: 10px; padding: 8px 10px;
     background: #16213e; border-radius: 6px;
     font-family: 'Consolas','Menlo',monospace; font-size: 0.84em;
-    max-height: 110px; overflow-y: auto;
-    line-height: 1.7; word-wrap: break-word;
+    max-height: 110px; overflow-y: auto; overflow-x: hidden;
+    line-height: 1.7; overflow-wrap: break-word; word-break: break-word;
 }
 .dash-section {
     background: #16213e; border-radius: 6px;
@@ -927,6 +927,7 @@ let activeC = 1;
 let boardCells = null;
 let dashTimeout = null;
 let searchDeadline = Infinity;
+let prevMoveT = { w: null, b: null };
 
 // ── Transposition Cache ────────────────────────────────────
 let thermoCache = new Map();
@@ -990,14 +991,14 @@ function quiesce(g, alpha, beta) {
 //
 // Phase 1: MAD for outlier-robust initial estimate.
 // Phase 2: Iterate Boltzmann-weighted σ until convergence.
-// The iteration is floored at half the MAD estimate to prevent
-// a self-reinforcing collapse: low T → peaked π → tiny σ_π →
-// lower T → ... → T_FLOOR → S = 0. The MAD captures the
-// natural energy scale before Boltzmann weighting, so half-MAD
-// keeps T proportional to the Q spread while still allowing
-// the iteration to sharpen the distribution.
-function robustT(Qs, n) {
+// Optional floorT (previous move's temperature) prevents
+// the self-reinforcing collapse where low T → peaked π →
+// tiny σ_π → lower T → S = 0. The position's temperature
+// shouldn't jump discontinuously between moves, so the
+// previous T provides a physically motivated floor.
+function robustT(Qs, n, floorT) {
     const sqrtC = Math.sqrt(activeC);
+    const iterFloor = (floorT > 0) ? Math.max(T_FLOOR, floorT) : T_FLOOR;
     const tmp = new Array(n);
     for (let i=0;i<n;i++) tmp[i]=Qs[i];
     tmp.sort((a,b) => a-b);
@@ -1005,9 +1006,7 @@ function robustT(Qs, n) {
     for (let i=0;i<n;i++) tmp[i]=Math.abs(Qs[i]-med);
     tmp.sort((a,b) => a-b);
     const mad = n&1 ? tmp[n>>1] : (tmp[(n>>1)-1]+tmp[n>>1])*0.5;
-    const madT = Math.max(1.4826*mad / sqrtC, T_FLOOR);
-    const iterFloor = Math.max(T_FLOOR, 0.5 * madT);
-    let T = madT;
+    let T = Math.max(1.4826*mad / sqrtC, iterFloor);
 
     let maxQ=Qs[0];
     for (let i=1;i<n;i++) if (Qs[i]>maxQ) maxQ=Qs[i];
@@ -1168,7 +1167,7 @@ function computeF(Qs, n, cacheKey) {
 }
 
 // ── Full Thermodynamic State (dashboard analysis) ──────────
-function computeThermodynamics(g, depth) {
+function computeThermodynamics(g, depth, floorT) {
     const rawMoves = g.fast_moves();
     if (rawMoves.length === 0) return null;
 
@@ -1189,7 +1188,7 @@ function computeThermodynamics(g, depth) {
     pathKeys.delete(posKey);
 
     const n = Qs.length;
-    const T = robustT(Qs, n);
+    const T = robustT(Qs, n, floorT);
     let maxQ = Qs[0], bestIdx = 0;
     for (let i = 1; i < n; i++) if (Qs[i] > maxQ) { maxQ = Qs[i]; bestIdx = i; }
 
@@ -1547,7 +1546,7 @@ function showPromotion(from, to) {
 function newGame() {
     thinking=false; game=new Chess();
     selectedSq=null; legalTargets=[]; lastMoveSquares=null;
-    moveHistory=[]; thermoCache = new Map(); graphData=[];
+    moveHistory=[]; thermoCache = new Map(); graphData=[]; prevMoveT = { w: null, b: null };
     renderBoard(); updateMoveList(); updateDashboard();
     if (humanColor==='b') { setStatus('Thinking...'); thinking=true; setTimeout(doAiMove,30); }
     else setStatus('Your move (White)');
@@ -1600,12 +1599,14 @@ function updateDashboard() {
     let thermo = null;
     let source = '';
     if (!game.game_over()) {
+        const side = game.turn();
         const depth = parseInt(document.getElementById('dashDepth').value) || 1;
         const saveNC = nodeCount;
         nodeCount = 0;
         thermoCache = new Map();
-        thermo = computeThermodynamics(game, depth);
+        thermo = computeThermodynamics(game, depth, prevMoveT[side]);
         nodeCount = saveNC;
+        if (thermo) prevMoveT[side] = thermo.T;
         source = 'Dashboard analysis (depth ' + depth + ')';
     }
 

@@ -989,13 +989,12 @@ function quiesce(g, alpha, beta) {
 //   C = 1 → T = σ (original behavior)
 //
 // Phase 1: MAD for outlier-robust initial estimate.
-// Phase 2: Iterate Boltzmann-weighted σ, floored at the MAD
-// estimate. The iteration can raise T above MAD (heavy-tailed
-// Q distributions) but cannot collapse below it — preventing
-// the runaway low-T → peaked-π → tiny-σ → lower-T → S=0
-// feedback loop. MAD tracks the Q spread naturally, so T rises
-// and falls with position complexity without a ratchet.
-function robustT(Qs, n) {
+// Phase 2: Iterate Boltzmann-weighted σ until convergence.
+// madFloor=true floors the iteration at the MAD estimate,
+// preventing the collapse to S=0. Used for dashboard display
+// only — the search uses madFloor=false (T_FLOOR) so that
+// F = T ln Z stays energy-dominated at internal nodes.
+function robustT(Qs, n, madFloor) {
     const sqrtC = Math.sqrt(activeC);
     const tmp = new Array(n);
     for (let i=0;i<n;i++) tmp[i]=Qs[i];
@@ -1005,6 +1004,7 @@ function robustT(Qs, n) {
     tmp.sort((a,b) => a-b);
     const mad = n&1 ? tmp[n>>1] : (tmp[(n>>1)-1]+tmp[n>>1])*0.5;
     const madT = Math.max(1.4826*mad / sqrtC, T_FLOOR);
+    const iterFloor = madFloor ? madT : T_FLOOR;
     let T = madT;
 
     let maxQ=Qs[0];
@@ -1016,9 +1016,9 @@ function robustT(Qs, n) {
         let avgQ=0, avgQ2=0;
         for (let i=0;i<n;i++) { const p=tmp[i]/expSum; avgQ+=p*Qs[i]; avgQ2+=p*Qs[i]*Qs[i]; }
         const sigW = Math.sqrt(Math.max(avgQ2 - avgQ*avgQ, 0));
-        const Tnew = Math.max(sigW / sqrtC, madT);
+        const Tnew = Math.max(sigW / sqrtC, iterFloor);
         if (Math.abs(Tnew-T) < 0.01) break;
-        T = Math.max(Math.sqrt(T*Tnew), madT);
+        T = Math.max(Math.sqrt(T*Tnew), iterFloor);
     }
     return T;
 }
@@ -1187,7 +1187,7 @@ function computeThermodynamics(g, depth) {
     pathKeys.delete(posKey);
 
     const n = Qs.length;
-    const T = robustT(Qs, n);
+    const T = robustT(Qs, n, true);
     let maxQ = Qs[0], bestIdx = 0;
     for (let i = 1; i < n; i++) if (Qs[i] > maxQ) { maxQ = Qs[i]; bestIdx = i; }
 

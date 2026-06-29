@@ -188,13 +188,6 @@ label { font-size: 0.85em; }
             <option value="hard">Hard (200K)</option>
             <option value="max">Max (1M)</option>
         </select>
-        <label>Depth:
-            <select id="dashDepth" onchange="updateDashboard()">
-                <option value="1" selected>1</option>
-                <option value="2">2</option>
-                <option value="3">3</option>
-            </select>
-        </label>
         <label>C: <input type="range" id="heatCap" min="0.5" max="5" step="0.1" value="1.0"
             oninput="onHeatCapChange(this.value)"><span id="heatCapVal">1.0</span>
         </label>
@@ -928,6 +921,10 @@ let activeC = 1;
 let boardCells = null;
 let dashTimeout = null;
 let searchDeadline = Infinity;
+let cachedRootQs = null;
+let cachedRootMoveNames = null;
+let cachedRootFromSqs = null;
+let cachedSearchDepth = 0;
 
 // ── Transposition Cache ────────────────────────────────────
 let thermoCache = new Map();
@@ -1169,51 +1166,6 @@ function computeF(Qs, n, cacheKey) {
     return val;
 }
 
-// ── Full Thermodynamic State (dashboard analysis) ──────────
-function computeThermodynamics(g, depth) {
-    const rawMoves = g.fast_moves();
-    if (rawMoves.length === 0) return null;
-
-    const pathKeys = new Set();
-    const posKey = g.fast_hash();
-    pathKeys.add(posKey);
-
-    const Qs = new Array(rawMoves.length);
-    const moveNames = new Array(rawMoves.length);
-    const fromSqs = new Array(rawMoves.length);
-    for (let i = 0; i < rawMoves.length; i++) {
-        moveNames[i] = g.fast_to_san(rawMoves[i]);
-        fromSqs[i] = g.fast_algebraic(rawMoves[i].from);
-        const kx = rawMoves[i].piece === 'k' && KING_EXT > 0;
-        g.fast_make(rawMoves[i]);
-        Qs[i] = -thermoSearch(g, kx ? depth : depth - 1, pathKeys, kx ? KING_EXT - 1 : KING_EXT);
-        g.fast_undo();
-    }
-    pathKeys.delete(posKey);
-
-    const n = Qs.length;
-    const T = robustT(Qs, n, true);
-    let maxQ = Qs[0], bestIdx = 0;
-    for (let i = 1; i < n; i++) if (Qs[i] > maxQ) { maxQ = Qs[i]; bestIdx = i; }
-
-    const expTerms = new Array(n);
-    let expSum = 0;
-    for (let i = 0; i < n; i++) { expTerms[i] = Math.exp((Qs[i]-maxQ)/T); expSum += expTerms[i]; }
-
-    const F = maxQ + T * Math.log(expSum);
-    const probs = new Array(n);
-    for (let i = 0; i < n; i++) probs[i] = expTerms[i] / expSum;
-
-    let avgQ = 0, S = 0;
-    for (let i = 0; i < n; i++) {
-        avgQ += probs[i] * Qs[i];
-        if (probs[i] > 1e-15) S -= probs[i] * Math.log(probs[i]);
-    }
-    const TS = T * S;
-
-    return { T, F, S, avgQ, TS, probs, moves: moveNames, fromSqs, Qs, bestIdx };
-}
-
 // ── Stockfish comparison (loaded from CDN) ────────────────
 let sfWorker = null;
 let sfReady = false;
@@ -1332,37 +1284,56 @@ function bestMove(g, timeLimitMs) {
     return g.fast_to_san(moves[bestIdx]);
 }
 
-// buildRootThermo: used only by computeThermodynamics (dashboard) now
-function buildRootThermo(g, rawMoves, Qs, depth) {
-    const n = rawMoves.length;
-    const T = robustT(Qs, n);
-
+function thermoFromQs(Qs, moveNames, fromSqs) {
+    const n = Qs.length;
+    const T = robustT(Qs, n, true);
     let maxQ = Qs[0], bestIdx = 0;
     for (let i = 1; i < n; i++) if (Qs[i] > maxQ) { maxQ = Qs[i]; bestIdx = i; }
-
     const expTerms = new Array(n);
     let expSum = 0;
     for (let i = 0; i < n; i++) { expTerms[i] = Math.exp((Qs[i]-maxQ)/T); expSum += expTerms[i]; }
-
     const F = maxQ + T * Math.log(expSum);
     const probs = new Array(n);
     for (let i = 0; i < n; i++) probs[i] = expTerms[i] / expSum;
-
     let avgQ = 0, S = 0;
     for (let i = 0; i < n; i++) {
         avgQ += probs[i] * Qs[i];
         if (probs[i] > 1e-15) S -= probs[i] * Math.log(probs[i]);
     }
     const TS = T * S;
+    return { T, F, S, avgQ, TS, probs, moves: moveNames, fromSqs, Qs, bestIdx };
+}
 
+function cacheRootQs(g, rawMoves, Qs, depth) {
+    const n = rawMoves.length;
+    cachedRootMoveNames = new Array(n);
+    cachedRootFromSqs = new Array(n);
+    for (let i = 0; i < n; i++) {
+        cachedRootMoveNames[i] = g.fast_to_san(rawMoves[i]);
+        cachedRootFromSqs[i] = g.fast_algebraic(rawMoves[i].from);
+    }
+    cachedRootQs = Qs.slice();
+    cachedSearchDepth = depth;
+}
+
+function quickRootQs(g) {
+    const moves = g.fast_moves();
+    const n = moves.length;
+    if (n === 0) return;
+    const Qs = new Array(n);
     const moveNames = new Array(n);
     const fromSqs = new Array(n);
     for (let i = 0; i < n; i++) {
-        moveNames[i] = g.fast_to_san(rawMoves[i]);
-        fromSqs[i] = g.fast_algebraic(rawMoves[i].from);
+        moveNames[i] = g.fast_to_san(moves[i]);
+        fromSqs[i] = g.fast_algebraic(moves[i].from);
+        g.fast_make(moves[i]);
+        Qs[i] = -quiesce(g, -Infinity, Infinity);
+        g.fast_undo();
     }
-
-    return { T, F, S, avgQ, TS, probs, moves: moveNames, fromSqs, Qs, bestIdx, depth };
+    cachedRootQs = Qs;
+    cachedRootMoveNames = moveNames;
+    cachedRootFromSqs = fromSqs;
+    cachedSearchDepth = 0;
 }
 
 // ── Board Rendering ────────────────────────────────────────
@@ -1471,12 +1442,23 @@ function doAiMove() {
     const moves = game.fast_moves();
     const n = moves.length;
     if (n === 0) { thinking = false; handleGameOver(); return; }
-    if (n === 1) { finishAiMove(game.fast_to_san(moves[0]), 1, 1); return; }
+    if (n === 1) {
+        game.fast_make(moves[0]);
+        const q = -quiesce(game, -Infinity, Infinity);
+        game.fast_undo();
+        cachedRootQs = [q];
+        cachedRootMoveNames = [game.fast_to_san(moves[0])];
+        cachedRootFromSqs = [game.fast_algebraic(moves[0].from)];
+        cachedSearchDepth = 0;
+        recordGraphEntry();
+        finishAiMove(game.fast_to_san(moves[0]), 1, 1); return;
+    }
     let bestIdx = 0, reachedDepth = 0;
     const pathKeys = new Set();
     const rootHash = game.fast_hash();
     (function searchDepth(depth) {
         if (performance.now() > deadline || nodeCount > NODE_HARD_LIMIT) {
+            recordGraphEntry();
             finishAiMove(game.fast_to_san(moves[bestIdx]), reachedDepth, nodeCount); return;
         }
         const Qs = new Array(n);
@@ -1493,6 +1475,7 @@ function doAiMove() {
             bestIdx = 0;
             for (let i = 1; i < n; i++) if (Qs[i] > Qs[bestIdx]) bestIdx = i;
             reachedDepth = depth;
+            cacheRootQs(game, moves, Qs, depth);
             const ord = []; for (let i = 0; i < n; i++) ord.push(i);
             ord.sort((a, b) => Qs[b] - Qs[a]);
             const nm = new Array(n); for (let i = 0; i < n; i++) nm[i] = moves[ord[i]];
@@ -1500,11 +1483,26 @@ function doAiMove() {
             bestIdx = 0;
         }
         if (timedOut || nodeCount > NODE_HARD_LIMIT) {
+            recordGraphEntry();
             finishAiMove(game.fast_to_san(moves[bestIdx]), reachedDepth, nodeCount);
         } else {
             setTimeout(function() { searchDepth(depth + 1); }, 0);
         }
     })(1);
+}
+function recordGraphEntry() {
+    if (!cachedRootQs || moveHistory.length === 0 || graphData.length >= moveHistory.length) return;
+    const thermo = thermoFromQs(cachedRootQs, cachedRootMoveNames, cachedRootFromSqs);
+    const { Uw, Ub } = rawU(game);
+    const eval_w = (game.turn() === 'w' ? 1 : -1) * thermo.F / PAWN_XRAY;
+    const U_w = (Uw - Ub) / PAWN_XRAY;
+    const idx = graphData.length;
+    graphData.push({
+        halfMove: moveHistory.length, eval_w, T: thermo.T, S: thermo.S,
+        side: game.turn(), move: moveHistory[moveHistory.length - 1],
+        U: U_w, sfEval: null, fen: game.fen()
+    });
+    queueSfEval(idx, game.fen());
 }
 function finishAiMove(moveSan, depth, nodes) {
     searchDeadline = Infinity;
@@ -1512,6 +1510,8 @@ function finishAiMove(moveSan, depth, nodes) {
     if (result) { lastMoveSquares = { from: result.from, to: result.to }; moveHistory.push(result.san); }
     thinking = false;
     searchStats = { depth: depth, nodes: nodes };
+    if (!game.game_over()) quickRootQs(game);
+    recordGraphEntry();
     renderBoard(); updateMoveList(); updateDashboard();
     if (game.game_over()) handleGameOver();
     else {
@@ -1548,6 +1548,7 @@ function newGame() {
     thinking=false; game=new Chess();
     selectedSq=null; legalTargets=[]; lastMoveSquares=null;
     moveHistory=[]; thermoCache = new Map(); graphData=[];
+    cachedRootQs=null; cachedRootMoveNames=null; cachedRootFromSqs=null; cachedSearchDepth=0;
     renderBoard(); updateMoveList(); updateDashboard();
     if (humanColor==='b') { setStatus('Thinking...'); thinking=true; setTimeout(doAiMove,30); }
     else setStatus('Your move (White)');
@@ -1559,6 +1560,7 @@ function undoMove() {
     if (graphData.length>0) graphData.pop();
     if (graphData.length>0) graphData.pop();
     lastMoveSquares=null; selectedSq=null; legalTargets=[];
+    cachedRootQs=null; cachedRootMoveNames=null; cachedRootFromSqs=null; cachedSearchDepth=0;
     renderBoard(); updateMoveList(); updateDashboard();
     setStatus('Your move ('+(humanColor==='w'?'White':'Black')+')');
 }
@@ -1569,6 +1571,7 @@ function switchSides() {
     aiColor = aiColor==='w' ? 'b' : 'w';
     selectedSq=null; legalTargets=[];
     thermoCache = new Map();
+    cachedRootQs=null; cachedRootMoveNames=null; cachedRootFromSqs=null; cachedSearchDepth=0;
     renderBoard();
     if (!game.game_over() && game.turn()===aiColor) { setStatus('Thinking...'); thinking=true; setTimeout(doAiMove,30); }
     else setStatus('Your move ('+(humanColor==='w'?'White':'Black')+')');
@@ -1599,27 +1602,9 @@ function updateDashboard() {
 
     let thermo = null;
     let source = '';
-    if (!game.game_over()) {
-        const depth = parseInt(document.getElementById('dashDepth').value) || 1;
-        const saveNC = nodeCount;
-        nodeCount = 0;
-        thermoCache = new Map();
-        thermo = computeThermodynamics(game, depth);
-        nodeCount = saveNC;
-        source = 'Dashboard analysis (depth ' + depth + ')';
-    }
-
-    // Record per-move data
-    if (thermo && moveHistory.length > 0 && graphData.length < moveHistory.length) {
-        const eval_w = (game.turn() === 'w' ? 1 : -1) * thermo.F / PAWN_XRAY;
-        const U_w = (Uw - Ub) / PAWN_XRAY;
-        const idx = graphData.length;
-        graphData.push({
-            halfMove: moveHistory.length, eval_w, T: thermo.T, S: thermo.S,
-            side: game.turn(), move: moveHistory[moveHistory.length - 1],
-            U: U_w, sfEval: null, fen: game.fen()
-        });
-        queueSfEval(idx, game.fen());
+    if (cachedRootQs && !game.game_over()) {
+        thermo = thermoFromQs(cachedRootQs, cachedRootMoveNames, cachedRootFromSqs);
+        source = cachedSearchDepth > 0 ? 'Search (depth ' + cachedSearchDepth + ')' : 'Quiescence';
     }
 
     renderThermoGrid(Uw, Ub, thermo, source);

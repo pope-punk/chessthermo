@@ -208,10 +208,10 @@ label { font-size: 0.85em; }
     </h2>
     <div id="dash-thermo" class="dash-section"><div class="dash-grid" id="thermo-grid"></div></div>
 
-    <h2>&mu;<sub>P</sub> = F &minus; F<sub>&minus;P</sub>
-        <span class="h2-sub">Exact free-energy cost of removing piece P from the partition function</span>
+    <h2>Move Analysis
+        <span class="h2-sub">Per-move thermodynamic state &amp; Stockfish comparison</span>
     </h2>
-    <div id="dash-chempot" class="dash-section"></div>
+    <div id="dash-movehistory" class="dash-section" style="max-height:240px;overflow-y:auto"></div>
 
     <h2>Evaluation Weights &pi;<sub>a</sub>
         <span class="h2-sub">Engine plays argmax Q; weights show competitive moves</span>
@@ -222,7 +222,7 @@ label { font-size: 0.85em; }
     <div class="dash-section">
         <div class="graph-controls">
             <select id="graphVar" onchange="renderGraph()">
-                <option value="eval" selected>Eval (&pawn;)</option>
+                <option value="eval" selected>Eval (&#9817;)</option>
                 <option value="T">T</option>
                 <option value="S">S</option>
             </select>
@@ -1209,66 +1209,61 @@ function computeThermodynamics(g, depth) {
     return { T, F, S, avgQ, TS, probs, moves: moveNames, fromSqs, Qs, bestIdx };
 }
 
-// ── Chemical Potential: μ_P = F − F_{−P} ──────────────────
-// Exact chemical potential from the partition function.
-// F = T ln Z over all moves; F_{-P} = T ln Z_{-P} excludes
-// moves originating from piece P.  μ_P is the free-energy
-// cost of removing piece P from the ensemble.
-//
-// At the search horizon (leaf), U = XRAY — the ideal-gas
-// limit where pieces contribute independently. Above the
-// horizon, chemical potentials emerge from the partition
-// function's recursive dependence on child F values.
-function computeChemicalPotentials(g, thermo) {
-    if (!thermo || !thermo.fromSqs || !thermo.Qs) return [];
+// ── Stockfish comparison (loaded from CDN) ────────────────
+let sfWorker = null;
+let sfReady = false;
+let sfBusy = false;
+let sfQueue = [];
+let sfCurrentIdx = -1;
+let sfCurrentScore = null;
 
-    const T = thermo.T;
-    const Qs = thermo.Qs;
-    const n = Qs.length;
-    const board = g.board();
-    const color = g.turn();
+async function initStockfish() {
+    try {
+        const r = await fetch('https://cdn.jsdelivr.net/npm/stockfish.js@10.0.2/stockfish.js');
+        const js = await r.text();
+        const blob = new Blob([js], { type: 'application/javascript' });
+        sfWorker = new Worker(URL.createObjectURL(blob));
+        sfWorker.onmessage = onSfMessage;
+        sfWorker.postMessage('uci');
+    } catch(e) { sfWorker = null; }
+}
 
-    let maxQ = Qs[0];
-    for (let i = 1; i < n; i++) if (Qs[i] > maxQ) maxQ = Qs[i];
-    if (!Number.isFinite(maxQ)) return [];
-
-    const expTerms = new Array(n);
-    let Z = 0;
-    for (let i = 0; i < n; i++) { expTerms[i] = Math.exp((Qs[i] - maxQ) / T); Z += expTerms[i]; }
-    const F = maxQ + T * Math.log(Z);
-
-    // Sum exp-terms by origin square
-    const sqExp = {};
-    for (let i = 0; i < n; i++) {
-        const sq = thermo.fromSqs[i];
-        sqExp[sq] = (sqExp[sq] || 0) + expTerms[i];
-    }
-
-    const results = [];
-    const seen = {};
-    for (let row = 0; row < 8; row++) {
-        for (let col = 0; col < 8; col++) {
-            const p = board[row][col];
-            if (!p || p.color !== color || p.type === 'k') continue;
-            const sq = sqId(col, 7 - row);
-            if (seen[sq]) continue;
-            seen[sq] = 1;
-            const pieceZ = sqExp[sq] || 0;
-            const Z_minus_P = Z - pieceZ;
-            let mu;
-            if (Z_minus_P < 1e-30) {
-                mu = F - (-CHECKMATE_SCORE);
-            } else {
-                const F_minus_P = maxQ + T * Math.log(Z_minus_P);
-                mu = F - F_minus_P;
-            }
-            const pSq = pieceZ / Z;
-            results.push({ type: p.type, square: sq, mu: mu, pSq: pSq });
+function onSfMessage(e) {
+    const line = typeof e.data === 'string' ? e.data : '';
+    if (line === 'uciok') {
+        sfWorker.postMessage('isready');
+    } else if (line === 'readyok') {
+        sfReady = true; sfBusy = false;
+        processSfQueue();
+    } else if (line.startsWith('info') && line.includes(' depth ')) {
+        const cp = line.match(/\bcp (-?\d+)/);
+        const mate = line.match(/\bmate (-?\d+)/);
+        if (cp) sfCurrentScore = parseInt(cp[1]) / 100;
+        else if (mate) sfCurrentScore = parseInt(mate[1]) > 0 ? 999 : -999;
+    } else if (line.startsWith('bestmove')) {
+        if (sfCurrentIdx >= 0 && sfCurrentIdx < graphData.length) {
+            const d = graphData[sfCurrentIdx];
+            graphData[sfCurrentIdx].sfEval = (d.side === 'w') ? sfCurrentScore : -sfCurrentScore;
+            renderMoveTable();
         }
+        sfBusy = false; sfCurrentIdx = -1;
+        processSfQueue();
     }
+}
 
-    results.sort((a, b) => b.mu - a.mu);
-    return results;
+function processSfQueue() {
+    if (!sfReady || sfBusy || sfQueue.length === 0) return;
+    const { idx, fen } = sfQueue.shift();
+    sfCurrentIdx = idx;
+    sfCurrentScore = null;
+    sfBusy = true;
+    sfWorker.postMessage('position fen ' + fen);
+    sfWorker.postMessage('go depth 12');
+}
+
+function queueSfEval(idx, fen) {
+    sfQueue.push({ idx, fen });
+    processSfQueue();
 }
 
 // ── Iterative Deepening ────────────────────────────────────
@@ -1607,16 +1602,21 @@ function updateDashboard() {
         source = 'Dashboard analysis (depth ' + depth + ')';
     }
 
-    // Record graph data — tag with side-to-move so T/S can be split
+    // Record per-move data
     if (thermo && moveHistory.length > 0 && graphData.length < moveHistory.length) {
         const eval_w = (game.turn() === 'w' ? 1 : -1) * thermo.F / PAWN_XRAY;
-        graphData.push({ halfMove: moveHistory.length, eval_w, T: thermo.T, S: thermo.S, side: game.turn() });
+        const U_w = (Uw - Ub) / PAWN_XRAY;
+        const idx = graphData.length;
+        graphData.push({
+            halfMove: moveHistory.length, eval_w, T: thermo.T, S: thermo.S,
+            side: game.turn(), move: moveHistory[moveHistory.length - 1],
+            U: U_w, sfEval: null, fen: game.fen()
+        });
+        queueSfEval(idx, game.fen());
     }
 
-    const mu = thermo ? computeChemicalPotentials(game, thermo) : [];
-
     renderThermoGrid(Uw, Ub, thermo, source);
-    renderChemPot(mu);
+    renderMoveTable();
     renderMoveProbs(thermo);
     renderGraph();
 }
@@ -1650,22 +1650,36 @@ function renderThermoGrid(Uw, Ub, th, source) {
     grid.innerHTML = html;
 }
 
-function renderChemPot(muData) {
-    const el = document.getElementById('dash-chempot');
-    if (!muData || muData.length === 0) { el.innerHTML='<span style="color:#666">N/A</span>'; return; }
+function renderMoveTable() {
+    const el = document.getElementById('dash-movehistory');
+    if (!el) return;
+    if (graphData.length === 0) { el.innerHTML = '<span style="color:#666">No moves yet</span>'; return; }
 
-    const color = game.turn();
-    let html = '<table class="prob-table"><tr><th>Piece</th><th style="text-align:right">\u03BC (\u2659)</th><th style="text-align:right">p<sub>P</sub></th></tr>';
-    for (const e of muData) {
-        const sym = PIECE_CHAR[color + e.type];
-        const muPawns = e.mu / PAWN_XRAY;
-        const sign = muPawns >= 0 ? '+' : '';
-        html += '<tr><td>' + sym + ' ' + e.square +
-                '</td><td style="text-align:right">' + sign + fmt(muPawns, 2) +
-                '</td><td style="text-align:right">' + fmt(e.pSq, 3) + '</td></tr>';
+    const sfStatus = sfWorker ? (sfReady ? '' : ' (loading)') : ' (offline)';
+    let html = '<table class="prob-table"><tr><th>#</th><th>Move</th>' +
+               '<th style="text-align:right">Eval</th><th style="text-align:right">SF' + sfStatus + '</th>' +
+               '<th style="text-align:right">S</th><th style="text-align:right">T</th>' +
+               '<th style="text-align:right">U</th></tr>';
+
+    for (let i = 0; i < graphData.length; i++) {
+        const d = graphData[i];
+        const moveNum = Math.ceil(d.halfMove / 2);
+        const isBlack = d.halfMove % 2 === 0;
+        const label = isBlack ? moveNum + '...' : moveNum + '.';
+        const ev = (d.eval_w >= 0 ? '+' : '') + d.eval_w.toFixed(2);
+        const sf = d.sfEval != null ? ((d.sfEval >= 0 ? '+' : '') + (Math.abs(d.sfEval) >= 999 ? (d.sfEval > 0 ? '#' : '-#') : d.sfEval.toFixed(2))) : '\u2026';
+        const u = (d.U >= 0 ? '+' : '') + d.U.toFixed(2);
+        const bg = isBlack ? ' style="background:rgba(255,255,255,0.03)"' : '';
+        html += '<tr' + bg + '><td>' + label + '</td><td>' + (d.move || '') + '</td>' +
+                '<td style="text-align:right">' + ev + '</td>' +
+                '<td style="text-align:right;color:#8c8">' + sf + '</td>' +
+                '<td style="text-align:right">' + d.S.toFixed(2) + '</td>' +
+                '<td style="text-align:right">' + d.T.toFixed(1) + '</td>' +
+                '<td style="text-align:right">' + u + '</td></tr>';
     }
     html += '</table>';
     el.innerHTML = html;
+    el.scrollTop = el.scrollHeight;
 }
 
 function renderMoveProbs(th) {
@@ -1835,6 +1849,7 @@ function renderGraph() {
     renderBoard();
     updateMoveList();
     updateDashboard();
+    initStockfish();
 })();
 </script>
 </body>

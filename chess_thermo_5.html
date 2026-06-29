@@ -880,6 +880,7 @@ const PAWN_XRAY = 11;
 const CHECKMATE_SCORE = 100000;
 const TIME_LIMITS = { easy:500, medium:2000, hard:8000, max:20000 };
 const BOLTZ_SIGMA = 3;
+const KING_EXT = 1;
 const NODE_HARD_LIMIT = 1000000;
 const PIECE_CHAR = {
     wk:'♔',wq:'♕',wr:'♖',wb:'♗',wn:'♘',wp:'♙',
@@ -1032,7 +1033,8 @@ function robustT(Qs, n, madFloor) {
 //
 // Draw detection via pathKeys set: if the current position
 // has appeared earlier on the search path, return 0 (draw).
-function thermoSearch(g, depth, pathKeys) {
+function thermoSearch(g, depth, pathKeys, ext) {
+    if (ext === undefined) ext = KING_EXT;
     nodeCount++;
 
     // Node hard limit: degrade gracefully
@@ -1069,8 +1071,9 @@ function thermoSearch(g, depth, pathKeys) {
         Qs = new Array(n);
         pathKeys.add(posKey);
         for (let i = 0; i < n; i++) {
+            const kx = moves[i].piece === 'k' && ext > 0;
             g.fast_make(moves[i]);
-            Qs[i] = -thermoSearch(g, depth - 1, pathKeys);
+            Qs[i] = -thermoSearch(g, kx ? depth : depth - 1, pathKeys, kx ? ext - 1 : ext);
             g.fast_undo();
         }
         pathKeys.delete(posKey);
@@ -1101,8 +1104,9 @@ function thermoSearch(g, depth, pathKeys) {
 
         for (let i = 0; i < exactIdx.length; i++) {
             const idx = exactIdx[i];
+            const kx = moves[idx].piece === 'k' && ext > 0;
             g.fast_make(moves[idx]);
-            Qs[idx] = -thermoSearch(g, depth - 1, pathKeys);
+            Qs[idx] = -thermoSearch(g, kx ? depth : depth - 1, pathKeys, kx ? ext - 1 : ext);
             g.fast_undo();
         }
 
@@ -1180,8 +1184,9 @@ function computeThermodynamics(g, depth) {
     for (let i = 0; i < rawMoves.length; i++) {
         moveNames[i] = g.fast_to_san(rawMoves[i]);
         fromSqs[i] = g.fast_algebraic(rawMoves[i].from);
+        const kx = rawMoves[i].piece === 'k' && KING_EXT > 0;
         g.fast_make(rawMoves[i]);
-        Qs[i] = -thermoSearch(g, depth - 1, pathKeys);
+        Qs[i] = -thermoSearch(g, kx ? depth : depth - 1, pathKeys, kx ? KING_EXT - 1 : KING_EXT);
         g.fast_undo();
     }
     pathKeys.delete(posKey);
@@ -1294,8 +1299,9 @@ function bestMove(g, timeLimitMs) {
         pathKeys.add(rootPosKey);
 
         for (let i = 0; i < n; i++) {
+            const kx = moves[i].piece === 'k' && KING_EXT > 0;
             g.fast_make(moves[i]);
-            Qs[i] = -thermoSearch(g, depth - 1, pathKeys);
+            Qs[i] = -thermoSearch(g, kx ? depth : depth - 1, pathKeys, kx ? KING_EXT - 1 : KING_EXT);
             g.fast_undo();
 
             if (performance.now() > deadline) { timedOut = true; break; }

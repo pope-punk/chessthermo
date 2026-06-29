@@ -990,6 +990,12 @@ function quiesce(g, alpha, beta) {
 //
 // Phase 1: MAD for outlier-robust initial estimate.
 // Phase 2: Iterate Boltzmann-weighted σ until convergence.
+// The iteration is floored at half the MAD estimate to prevent
+// a self-reinforcing collapse: low T → peaked π → tiny σ_π →
+// lower T → ... → T_FLOOR → S = 0. The MAD captures the
+// natural energy scale before Boltzmann weighting, so half-MAD
+// keeps T proportional to the Q spread while still allowing
+// the iteration to sharpen the distribution.
 function robustT(Qs, n) {
     const sqrtC = Math.sqrt(activeC);
     const tmp = new Array(n);
@@ -999,7 +1005,9 @@ function robustT(Qs, n) {
     for (let i=0;i<n;i++) tmp[i]=Math.abs(Qs[i]-med);
     tmp.sort((a,b) => a-b);
     const mad = n&1 ? tmp[n>>1] : (tmp[(n>>1)-1]+tmp[n>>1])*0.5;
-    let T = Math.max(1.4826*mad / sqrtC, T_FLOOR);
+    const madT = Math.max(1.4826*mad / sqrtC, T_FLOOR);
+    const iterFloor = Math.max(T_FLOOR, 0.5 * madT);
+    let T = madT;
 
     let maxQ=Qs[0];
     for (let i=1;i<n;i++) if (Qs[i]>maxQ) maxQ=Qs[i];
@@ -1010,9 +1018,9 @@ function robustT(Qs, n) {
         let avgQ=0, avgQ2=0;
         for (let i=0;i<n;i++) { const p=tmp[i]/expSum; avgQ+=p*Qs[i]; avgQ2+=p*Qs[i]*Qs[i]; }
         const sigW = Math.sqrt(Math.max(avgQ2 - avgQ*avgQ, 0));
-        const Tnew = Math.max(sigW / sqrtC, T_FLOOR);
+        const Tnew = Math.max(sigW / sqrtC, iterFloor);
         if (Math.abs(Tnew-T) < 0.01) break;
-        T = Math.max(Math.sqrt(T*Tnew), T_FLOOR);
+        T = Math.max(Math.sqrt(T*Tnew), iterFloor);
     }
     return T;
 }

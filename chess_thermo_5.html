@@ -927,7 +927,6 @@ let activeC = 1;
 let boardCells = null;
 let dashTimeout = null;
 let searchDeadline = Infinity;
-let prevMoveT = { w: null, b: null };
 
 // ── Transposition Cache ────────────────────────────────────
 let thermoCache = new Map();
@@ -990,15 +989,14 @@ function quiesce(g, alpha, beta) {
 //   C = 1 → T = σ (original behavior)
 //
 // Phase 1: MAD for outlier-robust initial estimate.
-// Phase 2: Iterate Boltzmann-weighted σ until convergence.
-// Optional floorT (previous move's temperature) prevents
-// the self-reinforcing collapse where low T → peaked π →
-// tiny σ_π → lower T → S = 0. The position's temperature
-// shouldn't jump discontinuously between moves, so the
-// previous T provides a physically motivated floor.
-function robustT(Qs, n, floorT) {
+// Phase 2: Iterate Boltzmann-weighted σ, floored at the MAD
+// estimate. The iteration can raise T above MAD (heavy-tailed
+// Q distributions) but cannot collapse below it — preventing
+// the runaway low-T → peaked-π → tiny-σ → lower-T → S=0
+// feedback loop. MAD tracks the Q spread naturally, so T rises
+// and falls with position complexity without a ratchet.
+function robustT(Qs, n) {
     const sqrtC = Math.sqrt(activeC);
-    const iterFloor = (floorT > 0) ? Math.max(T_FLOOR, floorT) : T_FLOOR;
     const tmp = new Array(n);
     for (let i=0;i<n;i++) tmp[i]=Qs[i];
     tmp.sort((a,b) => a-b);
@@ -1006,7 +1004,8 @@ function robustT(Qs, n, floorT) {
     for (let i=0;i<n;i++) tmp[i]=Math.abs(Qs[i]-med);
     tmp.sort((a,b) => a-b);
     const mad = n&1 ? tmp[n>>1] : (tmp[(n>>1)-1]+tmp[n>>1])*0.5;
-    let T = Math.max(1.4826*mad / sqrtC, iterFloor);
+    const madT = Math.max(1.4826*mad / sqrtC, T_FLOOR);
+    let T = madT;
 
     let maxQ=Qs[0];
     for (let i=1;i<n;i++) if (Qs[i]>maxQ) maxQ=Qs[i];
@@ -1017,9 +1016,9 @@ function robustT(Qs, n, floorT) {
         let avgQ=0, avgQ2=0;
         for (let i=0;i<n;i++) { const p=tmp[i]/expSum; avgQ+=p*Qs[i]; avgQ2+=p*Qs[i]*Qs[i]; }
         const sigW = Math.sqrt(Math.max(avgQ2 - avgQ*avgQ, 0));
-        const Tnew = Math.max(sigW / sqrtC, iterFloor);
+        const Tnew = Math.max(sigW / sqrtC, madT);
         if (Math.abs(Tnew-T) < 0.01) break;
-        T = Math.max(Math.sqrt(T*Tnew), iterFloor);
+        T = Math.max(Math.sqrt(T*Tnew), madT);
     }
     return T;
 }
@@ -1167,7 +1166,7 @@ function computeF(Qs, n, cacheKey) {
 }
 
 // ── Full Thermodynamic State (dashboard analysis) ──────────
-function computeThermodynamics(g, depth, floorT) {
+function computeThermodynamics(g, depth) {
     const rawMoves = g.fast_moves();
     if (rawMoves.length === 0) return null;
 
@@ -1188,7 +1187,7 @@ function computeThermodynamics(g, depth, floorT) {
     pathKeys.delete(posKey);
 
     const n = Qs.length;
-    const T = robustT(Qs, n, floorT);
+    const T = robustT(Qs, n);
     let maxQ = Qs[0], bestIdx = 0;
     for (let i = 1; i < n; i++) if (Qs[i] > maxQ) { maxQ = Qs[i]; bestIdx = i; }
 
@@ -1546,7 +1545,7 @@ function showPromotion(from, to) {
 function newGame() {
     thinking=false; game=new Chess();
     selectedSq=null; legalTargets=[]; lastMoveSquares=null;
-    moveHistory=[]; thermoCache = new Map(); graphData=[]; prevMoveT = { w: null, b: null };
+    moveHistory=[]; thermoCache = new Map(); graphData=[];
     renderBoard(); updateMoveList(); updateDashboard();
     if (humanColor==='b') { setStatus('Thinking...'); thinking=true; setTimeout(doAiMove,30); }
     else setStatus('Your move (White)');
@@ -1599,14 +1598,12 @@ function updateDashboard() {
     let thermo = null;
     let source = '';
     if (!game.game_over()) {
-        const side = game.turn();
         const depth = parseInt(document.getElementById('dashDepth').value) || 1;
         const saveNC = nodeCount;
         nodeCount = 0;
         thermoCache = new Map();
-        thermo = computeThermodynamics(game, depth, prevMoveT[side]);
+        thermo = computeThermodynamics(game, depth);
         nodeCount = saveNC;
-        if (thermo) prevMoveT[side] = thermo.T;
         source = 'Dashboard analysis (depth ' + depth + ')';
     }
 
